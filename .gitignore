@@ -1,0 +1,9 @@
+venv/
+.env
+chroma_db/
+.DS_Store
+__pycache__/
+*.pyc
+# 测试用的个人文档不提交（里面是简历等真实信息）
+documents/*.pdf
+!documents/.gitkeep

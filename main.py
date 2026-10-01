@@ -1,13 +1,3 @@
-"""
-main.py
-
-このファイルを実行すると、documents/フォルダ内のPDFに対して
-対話形式で質問できるようになります。
-
-実行方法:
-    python main.py
-"""
-
 import os
 import glob
 from dotenv import load_dotenv
@@ -32,8 +22,12 @@ def find_pdf_in_documents():
 
 
 def main():
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("エラー: .env ファイルに ANTHROPIC_API_KEY を設定してください。")
+    # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
+    # if not os.getenv("ANTHROPIC_API_KEY"):
+    #     print("エラー: .env ファイルに ANTHROPIC_API_KEY を設定してください。")
+    #     exit(1)
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("エラー: .env ファイルに GOOGLE_API_KEY を設定してください。")
         exit(1)
 
     pdf_path = find_pdf_in_documents()
