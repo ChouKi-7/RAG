@@ -1,0 +1,10 @@
+# クラウド(Azure等)デプロイ用。
+# 埋め込みは Gemini API を使うため、重い sentence-transformers / PyTorch は含めない。
+langchain==0.3.7
+langchain-google-genai==2.0.7
+langchain-community==0.3.7
+langchain-chroma==0.1.4
+chromadb==0.5.23
+pypdf==5.1.0
+python-dotenv==1.0.1
+streamlit==1.40.1

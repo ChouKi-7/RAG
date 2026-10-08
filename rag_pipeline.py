@@ -9,7 +9,6 @@ import os
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
 # from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -42,14 +41,36 @@ def split_into_chunks(documents, chunk_size: int = 500, chunk_overlap: int = 50)
     return chunks
 
 
-def build_vector_store(chunks, persist_directory: str = "./chroma_db"):
+def get_embeddings():
+    """
+    埋め込みモデルを返す。
+
+    環境変数 EMBEDDING_PROVIDER で切り替え可能:
+      - "huggingface"(デフォルト): ローカルで無料で動く多言語モデル。APIキー不要だが重い(PyTorchが必要)
+      - "google": Gemini の埋め込みAPI。軽量なのでクラウド(Azure等)へのデプロイ向け
+    """
+    provider = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
+    if provider == "google":
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        model = os.getenv("GOOGLE_EMBEDDING_MODEL", "models/gemini-embedding-001")
+        return GoogleGenerativeAIEmbeddings(model=model)
+
+    from langchain_huggingface import HuggingFaceEmbeddings
+    return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+
+
+def build_vector_store(chunks, persist_directory: str | None = "./chroma_db"):
     """
     ステップ3: 各チャンクをベクトル化し、ベクトルDB(Chroma)に保存する
 
-    HuggingFaceEmbeddings はローカルで無料で動く埋め込みモデルなので、
-    埋め込み部分は追加のAPIキー不要です。
+    persist_directory=None の場合はメモリ上のみ(Webアプリでアップロードしたファイル用)。
     """
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    embeddings = get_embeddings()
+
+    if persist_directory is None:
+        vector_store = Chroma.from_documents(documents=chunks, embedding=embeddings)
+        print("[ステップ3] ベクトルDBをメモリ上に作成しました。")
+        return vector_store
 
     # 既に永続化済みのベクトルDBがあれば、再埋め込みせずそのまま読み込む
     if os.path.exists(persist_directory) and os.listdir(persist_directory):
