@@ -48,47 +48,58 @@
 
 ## 四、接下来要做的步骤（按先后顺序，不是按优先级——部署是线性流程，必须依次完成）
 
-- [ ] **1. 本地构建镜像，验证 Dockerfile 没写错**（难度：低）
+- [x] **1. 本地构建镜像，验证 Dockerfile 没写错**（已完成）
   ```bash
   cd /Users/ki/rag-starter
   docker build -t rag-starter .
   ```
-  这一步会按 Dockerfile 的说明，把项目打包成一个叫 `rag-starter` 的镜像。如果这一步报错，说明 Dockerfile 或 `requirements-deploy.txt` 有问题，需要先修好再往下走。
+  构建成功。**注意**：这次默认构建出来的是 **arm64 架构**（因为本机是 Apple Silicon），后来推送到 Azure 时才发现 Azure Container Apps 要求 `linux/amd64`，导致第6步要用 `docker buildx` 跨架构重新构建，细节见第6步。
 
-- [ ] **2. 本地运行容器，验证网页能正常打开**（难度：低）
+- [x] **2. 本地运行容器，验证网页能正常打开**（已完成）
   ```bash
   docker run -p 8501:8501 --env-file .env -e EMBEDDING_PROVIDER=google rag-starter
   ```
-  浏览器打开 `http://localhost:8501`，应该能看到 Streamlit 网页界面，上传 PDF 测试问答流程。
-  **注意**：`--env-file .env` 是把本地的 `GOOGLE_API_KEY` 传进容器里，容器本身不含密钥（这也是为什么 `.dockerignore` 要排除 `.env`——镜像不应该内置密钥）。
+  浏览器打开 `http://localhost:8501`，上传 PDF 测试问答成功。
+  排查笔记：`docker run` 日志打印的是 `http://0.0.0.0:8501`，这个地址不能直接在浏览器打开，要用 `http://localhost:8501`（`0.0.0.0` 只是"监听所有网卡"的服务端自述，不是可访问地址）。另外前台运行的容器 `Ctrl+C` 有时停不掉，备用方法：开新终端 `docker ps` 找容器ID，`docker stop <ID>` 强制停止；之后记得 `docker container prune` 清理停止的容器，不然镜像会一直显示"in use"删不掉。
 
 - [x] **3. 确认 `GOOGLE_API_KEY` 支持 embedding 接口**（已完成）
-  本地用 `docker run ... -e EMBEDDING_PROVIDER=google` 跑起来后，上传职務経歴書 PDF、问"他叫什么"，成功检索并正确回答"他叫張琪（张琪）"——证明 `GoogleGenerativeAIEmbeddings` 和生成模型都能正常调用，key 权限没问题。
+  本地用 `docker run ... -e EMBEDDING_PROVIDER=google` 跑起来后，上传职務経歴書 PDF、问"他叫什么"，成功检索并正确回答出 PDF 上的姓名——证明 `GoogleGenerativeAIEmbeddings` 和生成模型都能正常调用，key 权限没问题。
   排查笔记：期间一度卡在"正在生成"很久没反应，排查过 DNS 解析（正常）、TCP 443 连接（正常），最后确认只是**首次调用较慢**（冷启动+库内部重试机制），不是网络或权限故障，多等一会儿就出结果了。
 
-- [ ] **4. 注册/登录 Azure 账号，安装 Azure CLI**（难度：低）
-  - 去 https://azure.microsoft.com/ 注册账号（新用户通常有免费额度）
-  - 本地安装 Azure 命令行工具：
+- [x] **4. 注册/登录 Azure 账号，安装 Azure CLI**（已完成）
+  - 已注册 Azure 账号（免费 plan）
+  - 本地安装好 Azure 命令行工具：
     ```bash
     brew install azure-cli
     az login
     ```
-    `az login` 会打开浏览器，登录你的 Azure 账号完成授权。
+    `az login` 成功，浏览器授权登录。
+  排查笔记：**Azure 的"免费"要分清层级**——App Service 的免费层（F1）**不支持自定义 Docker 容器**，必须升级到 Basic 及以上才能跑容器，所以第7步改用了有长期免费额度、且支持容器的 Container Apps（Consumption 方案）。
 
 - [x] **5. 创建 Azure 资源组（Resource Group）**（已完成）
   资源组是 Azure 里"把一堆相关资源打包管理"的容器，方便以后一起删除/管理。已创建 `rag-starter-rg`（`japaneast`），`provisioningState: Succeeded`。
 
-- [ ] **6. 推送镜像到仓库 —— 改用 Docker Hub（原计划的 Azure ACR 没有免费层，已排除）**（难度：中）
+- [x] **6. 推送镜像到仓库 —— 改用 Docker Hub（原计划的 Azure ACR 没有免费层，已排除）**（已完成）
 
-  **为什么换成 Docker Hub**：Azure 自己的镜像仓库 ACR，哪怕最便宜的 Basic 档也要约 $0.17/天（折合每月 5 美元左右）、按天计费、没有免费层，这笔钱躲不掉。而 Docker Hub（Docker 官方的镜像仓库）**个人账号永久免费**（公开仓库无限制，私有仓库也有免费额度），并且 Azure Container Apps 不要求镜像必须放在 ACR——它可以直接从 Docker Hub 拉镜像，两者完全兼容。换成 Docker Hub 后，这一步彻底不花钱。
+  **为什么换成 Docker Hub**：Azure 自己的镜像仓库 ACR，哪怕最便宜的 Basic 档也要约 $0.17/天（折合每月 5 美元左右）、按天计费、没有免费层，这笔钱躲不掉。而 Docker Hub（Docker 官方的镜像仓库）**个人账号永久免费**（公开仓库无限制，私有仓库也有免费额度），并且 Azure Container Apps 不要求镜像必须放在 ACR——它可以直接从 Docker Hub 拉镜像，两者完全兼容。换成 Docker Hub 后，这一步彻底不花钱。仓库设成了 **Public**。
 
+  最初执行的命令：
   ```bash
-  # 去 https://hub.docker.com 注册账号（如果还没有）
   docker login
-  docker tag rag-starter <你的DockerHub用户名>/rag-starter:latest
-  docker push <你的DockerHub用户名>/rag-starter:latest
+  docker tag rag-starter <DockerHub用户名>/rag-starter:latest
+  docker push <DockerHub用户名>/rag-starter:latest
   ```
-  默认推送的是**公开仓库**（任何人能看到镜像内容，但不含密钥——`GOOGLE_API_KEY` 是运行时注入的，不在镜像里，所以公开也不算泄密，只是代码逻辑会暴露）。如果介意，去 Docker Hub 网页把这个仓库设成 Private（免费额度内可以设 1 个私有仓库）。
+  **踩坑记录（重要）**：第一次推送后，第7d步创建 Container App 时报错：
+  ```
+  Invalid value: "xxx/rag-starter:latest": no child with platform linux/amd64 in index ...
+  ```
+  原因：本机是 Apple Silicon（arm64），`docker build` 默认按本机架构打包，但 Azure Container Apps（Consumption 方案）只支持 **linux/amd64**。
+  **解决**：改用 `docker buildx` 跨架构构建并直接推送：
+  ```bash
+  docker buildx build --platform linux/amd64 -t <DockerHub用户名>/rag-starter:latest --push .
+  ```
+  重新推送后，第7d步的 `az containerapp create` 才成功拉取镜像并运行。
+  **以后每次改代码重新部署，都要用这条 `buildx` 命令，不能用普通的 `docker build`**，否则会复现这个架构不匹配的报错。
 
 - [x] **7. 创建 Azure 服务来运行这个镜像 —— 改用 Container Apps（原计划的 App Service 免费层不支持自定义容器，已排除）**（难度：中）
 
@@ -136,14 +147,22 @@
 
   这一步已经把原来第8步"配置环境变量"的内容合并进来了，不用再单独跑一次 `az webapp config appsettings set`（那是 App Service 专用命令，Container Apps 不适用）。
 
-- [ ] **8. 查看分配的网址，验证部署成功**（难度：低）
+- [x] **8. 查看分配的网址，验证部署成功**（已完成）
   ```bash
   az containerapp show \
     --name rag-starter-app \
     --resource-group rag-starter-rg \
     --query properties.configuration.ingress.fqdn -o tsv
   ```
-  会输出类似 `rag-starter-app.xxxxx.japaneast.azurecontainerapps.io` 的域名，浏览器打开（记得加 `https://` 前缀）验证能否正常使用。
+  拿到网址 `https://rag-starter-app.happyrock-4818498e.japaneast.azurecontainerapps.io/`，打开后上传职務経歴書 PDF、问"他叫什么"，**成功收到正确回答（PDF 上的真实姓名）**——完整的云端链路（embedding + 检索 + 生成）全部跑通，部署正式成功。
+
+  **已知问题（暂不处理）**：第一次实际测试时，生成回答那一步卡在"正在生成"将近 10 分钟才出结果。查 Azure 的 Log stream（路径：Azure Portal → 进入 `rag-starter-app` 资源 → 左侧"监视"→ "Log stream"）发现报错：
+  ```
+  Retrying ... as it raised DeadlineExceeded: 504 Deadline expired before operation could complete.
+  ```
+  原因：`langchain_google_genai` 内部用的是已停止维护的 `google.generativeai` 包（走 gRPC 协议），gRPC 在 Azure 到 Google 服务器之间偶尔会连接不稳定/超时，库自带的自动重试机制最终能成功，但会很慢。
+  **尝试过的修复**：给 `ChatGoogleGenerativeAI` / `GoogleGenerativeAIEmbeddings` 加 `transport="rest"` 参数——**结果更糟**，会导致认证方式变成找 Google Cloud 的"默认凭证"而不是 `GOOGLE_API_KEY`，直接报 `DefaultCredentialsError`，完全连不上。已撤销这个改动，代码恢复原状。
+  **真正的长期解法**（以后有空再做，优先级低）：升级到 Google 官方推荐的新包 `google-genai`（配合新版 `langchain-google-genai`），但涉及多个依赖包版本的连锁升级，可能跟项目锁定的 `langchain==0.3.7` 系列冲突，需要单独花时间验证，不建议现在顺手做。
 
 - [ ] **9.（可选）配置自定义域名 / HTTPS 证书**（难度：中，优先级低，想要正式一点再做）
 
