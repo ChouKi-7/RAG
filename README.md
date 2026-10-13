@@ -81,6 +81,7 @@ rag-starter/
 
 Web版(`app.py`)をDockerコンテナ化し、Azure Container Apps にデプロイ済みです。
 
+- **デモURL**: https://rag-starter-app.happyrock-4818498e.japaneast.azurecontainerapps.io/
 - **デプロイ日**: 2026年10月8日
 - **使用サービス**: Azure Container Apps(Consumptionプラン、`--min-replicas 0` でアクセスがない時は自動スケールダウン)
 - **イメージ保管先**: Docker Hub
