@@ -147,4 +147,58 @@ docker image prune
 
 ---
 
+## 八、其他常用命令（目前用不到，但以后排查问题/管理时会用到）
+
+### Docker
+
+```bash
+# 删除指定镜像（先确保没有容器在用它，见第二节 prune）
+docker rmi <镜像名或ID>
+
+# 钻进一个正在运行的容器内部，像进了一个远程终端一样（排查问题用）
+docker exec -it <容器ID> sh
+
+# 查看某个容器的日志（不用 -it 进去，直接看输出）
+docker logs <容器ID>
+docker logs -f <容器ID>   # -f 持续追踪，像 tail -f
+
+# 查看容器的详细配置信息（JSON格式，端口映射、环境变量等都在里面）
+docker inspect <容器ID>
+
+# 实时查看容器的资源占用（CPU、内存），类似 Mac 的活动监视器
+docker stats
+
+# 查看 Docker 占了多少硬盘空间（镜像、容器、缓存分别多大）
+docker system df
+
+# 一次性清理所有没用的东西（镜像、容器、网络、构建缓存），彻底释放空间
+docker system prune -a
+```
+
+### Azure
+
+```bash
+# 查看当前登录的是哪个账号/订阅
+az account show
+
+# 列出这个账号下所有的资源组（不止 rag-starter-rg 这一个）
+az group list -o table
+
+# 列出这个账号下所有的 Container App（如果以后做了别的项目）
+az containerapp list -o table
+
+# 查看某个 Container App 的历史版本（每次 update 都会生成一条新记录）
+az containerapp revision list --name rag-starter-app --resource-group rag-starter-rg -o table
+
+# 只删除这一个应用，不删整个资源组/环境（比 az group delete 更精细）
+az containerapp delete --name rag-starter-app --resource-group rag-starter-rg
+
+# 退出登录（换账号或者在别人电脑上用完要清理时）
+az logout
+```
+
+**查费用**：Azure CLI 查费用的命令比较繁琐，不推荐背命令，直接去 Azure Portal 网页 → 搜索「成本管理」（Cost Management）→ 选对应的订阅，图表化看得更清楚。
+
+---
+
 *这份速查表由 Claude 根据 2026-10-13 之前的部署过程整理，命令参数以当时验证通过的为准，如果 Azure CLI 以后有重大版本变化，建议对照当前 `az containerapp --help` 输出核对。*
