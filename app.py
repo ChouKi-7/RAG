@@ -21,6 +21,16 @@ st.set_page_config(page_title="PDF質問応答 (RAG)", page_icon="📄")
 st.title("📄 PDF質問応答アプリ (RAG)")
 st.caption("PDFをアップロードすると、その内容についてAIに質問できます。")
 
+# APP_PASSWORD が設定されている場合のみパスワードを要求する(未設定ならローカル開発用に素通り)
+app_password = os.getenv("APP_PASSWORD")
+if app_password and not st.session_state.get("authenticated"):
+    entered = st.text_input("パスワードを入力してください", type="password")
+    if entered != app_password:
+        if entered:
+            st.error("パスワードが違います。")
+        st.stop()
+    st.session_state.authenticated = True
+
 if not os.getenv("GOOGLE_API_KEY"):
     st.error("環境変数 GOOGLE_API_KEY が設定されていません。")
     st.stop()
@@ -39,9 +49,15 @@ if uploaded is not None and st.session_state.get("file_name") != uploaded.name:
             st.session_state.qa_chain = build_qa_chain(vector_store)
             st.session_state.file_name = uploaded.name
             st.session_state.messages = []
+        except Exception:
+            st.error("PDFの処理中にエラーが発生しました。しばらくしてから再度お試しください。")
+            st.session_state.pop("qa_chain", None)
+            st.session_state.pop("file_name", None)
+            chunks = None
         finally:
             os.remove(tmp_path)
-    st.success(f"準備完了: {uploaded.name}（{len(chunks)}チャンク）")
+    if chunks is not None:
+        st.success(f"準備完了: {uploaded.name}（{len(chunks)}チャンク）")
 
 if "qa_chain" in st.session_state:
     for msg in st.session_state.messages:
@@ -54,12 +70,18 @@ if "qa_chain" in st.session_state:
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            with st.spinner("回答を生成しています..."):
-                answer, sources = ask_question(st.session_state.qa_chain, question)
-            st.markdown(answer)
-            with st.expander(f"参照した箇所（{len(sources)}件）"):
-                for i, doc in enumerate(sources, 1):
-                    page = doc.metadata.get("page")
-                    st.markdown(f"**{i}.** p.{page + 1 if page is not None else '?'}")
-                    st.text(doc.page_content[:300])
+            try:
+                with st.spinner("回答を生成しています..."):
+                    answer, sources = ask_question(st.session_state.qa_chain, question)
+            except Exception:
+                answer = "回答の生成中にエラーが発生しました。しばらくしてから再度お試しください。"
+                st.error(answer)
+                sources = []
+            else:
+                st.markdown(answer)
+                with st.expander(f"参照した箇所（{len(sources)}件）"):
+                    for i, doc in enumerate(sources, 1):
+                        page = doc.metadata.get("page")
+                        st.markdown(f"**{i}.** p.{page + 1 if page is not None else '?'}")
+                        st.text(doc.page_content[:300])
         st.session_state.messages.append({"role": "assistant", "content": answer})
