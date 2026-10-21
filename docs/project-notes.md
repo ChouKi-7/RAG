@@ -158,9 +158,12 @@ while True:
   ```
   （具体参数可能需要对照当时的 `az containerapp update --help` 核对一下，`--replace-secrets` 这个写法没有实际验证过。）
 
-- [ ] **10. 检索质量比较粗糙，没有相关性过滤**（难度：中，优先级：中）
-  现状：[rag_pipeline.py](../rag_pipeline.py) 的 `build_qa_chain()` 固定用 `search_kwargs={"k": 3}`，不管检索到的 3 段跟问题实际相关度多高，都会原样塞给 LLM。如果 PDF 里根本没有相关内容（或者像之前日语检索失效那次一样，检索到的是完全不相关的片段），LLM 还是会硬着头皮"编"一个回答，而不是老实说"没找到"。
-  → 用带分数的检索（比如 Chroma 的 `similarity_search_with_score`），给相关性设一个阈值，低于阈值时不传给 LLM，直接提示用户"没有在文档中找到相关内容"，避免模型瞎编。
+- [x] **10. 检索质量比较粗糙，没有相关性过滤**（已完成）
+  原来 `build_qa_chain()` 用的是 `RetrievalQA.from_chain_type(...)`，固定取 `k=3`，不管相关度多低都原样塞给 LLM。现在改成手动调用 `vector_store.similarity_search_with_score()`，拿到的片段按 `score_threshold` 过滤：低于阈值（更相似）才会传给 LLM，一个都没达标时直接返回"文書内に関連する内容が見つかりませんでした"，不调用 LLM。
+  `qa_chain` 的返回类型从 `RetrievalQA` 对象改成了普通 dict（`{"llm", "vector_store", "score_threshold"}`），`ask_question()` 内部自己组装 prompt 调用 `llm.invoke()`，不再依赖 `RetrievalQA` 这个封装类（对应的 `from langchain.chains import RetrievalQA` 这行 import 也删掉了）。`main.py`/`app.py` 只是把 `qa_chain` 当黑盒透传，没碰过它的具体类型，所以不用改。
+  **踩坑记录（重要）**：实测发现 Chroma 返回的"距离分数"，量级会因 embedding 来源不同而完全不一样——本地 `huggingface` 模型：相关内容 16~18 分、不相关 29~33 分；云端 `google` embedding：相关内容 0.69~0.76 分、不相关 0.88~0.92 分（都是分数越低越相似）。如果写死一个阈值，换个 embedding provider 直接失效。所以阈值按 provider 分别设了默认值（`_RELEVANCE_THRESHOLDS` 字典），也支持用环境变量 `RELEVANCE_SCORE_THRESHOLD` 整体覆盖。
+  **注意**：这两个默认阈值是用 `documents/` 里那一份测试 PDF 实测校准的，换一份内容/语言差异很大的 PDF，这两个数字不一定还准，必要时要重新实测调整。
+  本地验证：问"他叫什么"能正常检索并回答；问"今天东京天气怎么样"（跟 PDF 内容完全无关）正确返回"未找到相关内容"，没有瞎编。
 
 - [ ] **11. 没有流式输出，要等全部生成完才显示**（难度：低，优先级：中，纯体验优化）
   现状：[app.py](../app.py) 里 `ask_question()` 是一次性拿到完整回答才显示，用户看到的是"转圈等待→突然整段文字出现"，体验不如主流 AI 产品的逐字流式输出。
