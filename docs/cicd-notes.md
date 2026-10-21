@@ -34,19 +34,20 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
 
 ## 三、当前进度（已完成）
 
-- [ ] 暂无，还没开始
+- [x] 第1～5步全部完成，`.github/workflows/deploy.yml` 已经跑通一次完整的自动部署（构建镜像→推送 Docker Hub→更新 Azure Container App），全部变成绿色 ✓
 
 ---
 
 ## 四、接下来要做的步骤（按先后顺序，不是按优先级——每一步都依赖前一步）
 
-- [ ] **1. 生成 Docker Hub Access Token**（难度：低）
+- [x] **1. 生成 Docker Hub Access Token**（已完成）
   - 去 https://hub.docker.com/settings/security
   - 点 "New Access Token"，起个名字（比如 `github-actions`），权限选 **Read & Write**
   - 生成后**立刻复制保存**（只显示一次），先存进本地密码管理器
   - **不要**把这个 token 直接粘贴进聊天记录或代码里
+  **踩坑记录（重要）**：第一次生成的 token 不小心截图发进了聊天记录里，当场**吊销作废**重新生成了一个，没有继续使用泄露过的那个——提醒自己：密钥一旦进了聊天记录/截图，就必须当作已泄露处理，直接作废重开，不要心存侥幸。
 
-- [ ] **2. 创建 Azure 服务主体（给自动化专用的身份）**（难度：中）
+- [x] **2. 创建 Azure 服务主体（给自动化专用的身份）**（已完成）
   ```bash
   az ad sp create-for-rbac \
     --name "github-actions-rag-starter" \
@@ -58,7 +59,7 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
   执行后会输出一段 JSON（含 `clientId`、`clientSecret`、`subscriptionId`、`tenantId`），**只显示这一次**，完整复制保存下来。
   **注意**：`--scopes` 把权限限定在 `rag-starter-rg` 这一个资源组，不是整个 Azure 账号的权限，就算这个凭证泄露，影响范围也是可控的。
 
-- [ ] **3. 把凭证存进 GitHub 仓库的 Secrets**（难度：低）
+- [x] **3. 把凭证存进 GitHub 仓库的 Secrets**（已完成）
   仓库页面 → Settings → Secrets and variables → Actions → New repository secret，依次添加：
 
   | Secret 名字 | 值 |
@@ -67,7 +68,10 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
   | `DOCKERHUB_TOKEN` | 第1步生成的 token |
   | `AZURE_CREDENTIALS` | 第2步那一整段 JSON |
 
-- [ ] **4. 创建 workflow 文件**（难度：中，这一步不涉及密钥，可以直接写进仓库）
+  **踩坑记录**：GitHub 仓库自己的 Settings、GitHub 个人账号的 Settings、Docker Hub 自己的 Settings，这三个长得有点像，容易找错地方——Secrets 功能**只存在于"某个具体仓库"自己的 Settings 里**（仓库页面顶部标签栏最右边的 Settings，不是左上角头像那个账号设置）。
+  另外 Secret 一旦保存就**无法再查看原值**，编辑页面永远是空白输入框，只能整个覆盖重写，这是刻意设计的安全机制，不是 bug。
+
+- [x] **4. 创建 workflow 文件**（已完成，内容跟下面一致）
   在项目根目录创建 `.github/workflows/deploy.yml`：
   ```yaml
   name: Build and Deploy
@@ -116,13 +120,25 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
   ```
   这份 workflow 做的事，跟之前手动敲的那几条命令完全对应：构建镜像（用 buildx，保证 amd64 架构）→ 推送到 Docker Hub → 登录 Azure → 更新 Container App。
 
-- [ ] **5. 提交并推送，验证自动化生效**（难度：低）
+- [x] **5. 提交并推送，验证自动化生效**（已完成）
   ```bash
   git add .github/workflows/deploy.yml
   git commit -m "add CI/CD workflow"
   git push
   ```
-  推送后去仓库页面的 **Actions** 标签页，应该能看到一个新的 workflow 正在运行（黄色圆圈 = 进行中，绿色勾 = 成功，红叉 = 失败）。点进去能看到每一步的详细日志，方便排查问题。
+  （实际操作时用的是 VS Code 的"源代码管理"面板点击完成的，效果跟命令行完全一样。）
+  推送后去仓库页面的 **Actions** 标签页（或 VS Code 的 GitHub Actions 插件），能看到 workflow 实时运行状态（黄色圆圈 = 进行中，绿色勾 = 成功，红叉 = 失败）。
+
+  **踩坑记录（重要）**：第一次跑，`Build and push image` 这一步报错：
+  ```
+  Error: buildx failed with: ERROR: failed to build: failed to solve: failed to fetch oauth token:
+  unexpected status from GET request to https://auth.docker.io/token?...: 401 Unauthorized:
+  access token has insufficient scopes
+  ```
+  token 创建时权限（Read & Write）本身是对的，真正原因是 **`DOCKERHUB_TOKEN` 这个 Secret 存的内容跟实际 token 对不上**（复制粘贴的时候出了点问题，具体没查清是多了空格还是复制不完整——因为 Secret 没法回看内容，只能排除法处理）。
+  → 解决办法：重新生成一个新 token，这次用 Docker Hub 页面自带的 "Copy" 按钮而不是手动框选，再去 GitHub 把 `DOCKERHUB_TOKEN` 这个 Secret **整个覆盖**成新值。
+  → 改完不用重新 push 代码，去 Actions 运行记录页面点 **"Re-run jobs" → "Re-run failed jobs"** 就能直接重跑失败的部分，第二次跑全部变绿，确认问题解决。
+  教训：**Docker Hub token 复制时一定要用页面自带的 Copy 按钮**，手动选中容易漏字符/多空格，这类错误报出来的提示（"insufficient scopes"）会让人误以为是权限选错了，其实是复制粘贴的问题，排查时不要被报错字面意思带偏。
 
 - [ ] **6.（验证）改一行代码，测试全自动流程**（难度：低）
   随便改一点代码（比如改个文案），`git push`，不用手动跑任何 docker/az 命令，几分钟后直接去应用网址刷新看效果，确认真的自动生效了。

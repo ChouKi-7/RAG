@@ -34,19 +34,20 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
 
 ## 三、現在の進捗（完了済み）
 
-- [ ] まだなし、未着手
+- [x] 手順1〜5がすべて完了。`.github/workflows/deploy.yml` が一連の自動デプロイ（イメージビルド→Docker Hubへプッシュ→Azure Container Appの更新）を正常に完走し、すべて緑のチェック ✓ になった
 
 ---
 
 ## 四、これからやる手順（先後順——優先度順ではない。各手順が前の手順に依存している）
 
-- [ ] **1. Docker Hub Access Token を生成する**（難易度：低）
+- [x] **1. Docker Hub Access Token を生成する**（完了）
   - https://hub.docker.com/settings/security を開く
   - "New Access Token" をクリックし、名前を付ける（例：`github-actions`）、権限は **Read & Write** を選択
   - 生成後**すぐにコピーして保存**（一度しか表示されない）。まずローカルのパスワードマネージャーに保存する
   - このtokenをチャットやコードに**直接貼り付けない**こと
+  **トラブルシューティングメモ（重要）**：最初に生成したtokenを誤ってスクリーンショットでチャットに貼ってしまい、その場で**失効させて**新しく生成し直した。漏洩したtokenはそのまま使い続けなかった——教訓：鍵がチャット履歴やスクリーンショットに一度でも入ったら、「漏洩した」ものとして扱い、様子見せずすぐに失効・再生成すること。
 
-- [ ] **2. Azureサービスプリンシパルを作成する（自動化専用のID）**（難易度：中）
+- [x] **2. Azureサービスプリンシパルを作成する（自動化専用のID）**（完了）
   ```bash
   az ad sp create-for-rbac \
     --name "github-actions-rag-starter" \
@@ -58,7 +59,7 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
   実行すると `clientId`、`clientSecret`、`subscriptionId`、`tenantId` を含むJSONが出力される（**一度しか表示されない**）。完全にコピーして保存すること。
   **注意**：`--scopes` で権限を `rag-starter-rg` という1つのリソースグループに限定している。Azureアカウント全体の権限ではないため、万一この認証情報が漏洩しても影響範囲は限定的。
 
-- [ ] **3. 認証情報をGitHubリポジトリのSecretsに保存する**（難易度：低）
+- [x] **3. 認証情報をGitHubリポジトリのSecretsに保存する**（完了）
   リポジトリページ → Settings → Secrets and variables → Actions → New repository secret で、以下を順に追加：
 
   | Secret名 | 値 |
@@ -67,7 +68,10 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
   | `DOCKERHUB_TOKEN` | 手順1で生成したtoken |
   | `AZURE_CREDENTIALS` | 手順2で出力されたJSON全体 |
 
-- [ ] **4. workflowファイルを作成する**（難易度：中、この手順は鍵を扱わないのでリポジトリに直接書いてよい）
+  **トラブルシューティングメモ**：GitHubリポジトリ自身のSettings、GitHub個人アカウントのSettings、Docker Hub自身のSettingsの3つは見た目が似ていて間違えやすい——Secrets機能は**特定のリポジトリ自身のSettings内にのみ存在する**（リポジトリページ上部タブの一番右のSettingsであり、左上のアバターから開くアカウント設定ではない）。
+  また、一度保存したSecretは**元の値を二度と確認できない**。編集画面は常に空の入力欄になっており、これは意図的なセキュリティ設計であってバグではない。上書きで新しい値を丸ごと入れ直すことしかできない。
+
+- [x] **4. workflowファイルを作成する**（完了、内容は下記の通り）
   プロジェクトのルートに `.github/workflows/deploy.yml` を作成：
   ```yaml
   name: Build and Deploy
@@ -116,13 +120,25 @@ az containerapp update --name rag-starter-app --resource-group rag-starter-rg --
   ```
   このworkflowがやっていることは、これまで手動で実行していたコマンドと完全に対応している：イメージをビルド（buildxでamd64アーキテクチャを保証）→ Docker Hubへプッシュ → Azureにログイン → Container Appを更新。
 
-- [ ] **5. コミット・プッシュして自動化が動くことを確認する**（難易度：低）
+- [x] **5. コミット・プッシュして自動化が動くことを確認する**（完了）
   ```bash
   git add .github/workflows/deploy.yml
   git commit -m "add CI/CD workflow"
   git push
   ```
-  プッシュ後、リポジトリページの **Actions** タブを開くと、新しいworkflowが実行されているのが見える（黄色い丸＝実行中、緑のチェック＝成功、赤いバツ＝失敗）。クリックすると各ステップの詳細ログが見られ、問題の切り分けに便利。
+  （実際にはVS Codeの「ソース管理」パネルをクリックして操作した。コマンドラインと効果は同じ。）
+  プッシュ後、リポジトリページの **Actions** タブ（またはVS CodeのGitHub Actions拡張機能）でworkflowのリアルタイム実行状況が見られる（黄色い丸＝実行中、緑のチェック＝成功、赤いバツ＝失敗）。
+
+  **トラブルシューティングメモ（重要）**：初回実行時、`Build and push image` のステップで以下のエラーが発生：
+  ```
+  Error: buildx failed with: ERROR: failed to build: failed to solve: failed to fetch oauth token:
+  unexpected status from GET request to https://auth.docker.io/token?...: 401 Unauthorized:
+  access token has insufficient scopes
+  ```
+  token作成時の権限（Read & Write）自体は正しく、本当の原因は **`DOCKERHUB_TOKEN` というSecretに保存した内容が実際のtokenと一致していなかった**こと（コピー＆ペーストの際に何らかの問題が発生——余分なスペースが入ったのか不完全なコピーだったのか、Secretは内容を確認し直せないため特定はできなかった）。
+  → 対処法：新しいtokenを再生成し、今度はDocker Hubページ自体の「Copy」ボタンを使い（手動で選択しない）、GitHubの `DOCKERHUB_TOKEN` Secretを**丸ごと上書き**した。
+  → 修正後はコードを再pushする必要はなく、Actionsの実行履歴ページで **「Re-run jobs」→「Re-run failed jobs」** をクリックするだけで失敗した部分だけ再実行できる。2回目の実行ですべて緑になり、問題解決を確認した。
+  教訓：**Docker Hub tokenをコピーする際は必ずページ自体のCopyボタンを使うこと**。手動選択は文字の欠落や余分なスペースが入りやすく、そのせいで出るエラー（「insufficient scopes」）は権限設定を誤ったかのような誤解を招くが、実際はコピー＆ペーストの問題であることが多い。エラー文の字面に惑わされず調査すること。
 
 - [ ] **6.（検証）コードを1行変更し、全自動フローをテストする**（難易度：低）
   適当にコードを少し変更して（例えば文言を変える程度）、`git push` する。docker/azコマンドを一切手動で実行せず、数分後にアプリのURLを更新して変更が反映されているか確認し、本当に自動化が動いていることを確かめる。
