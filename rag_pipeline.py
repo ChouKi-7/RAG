@@ -12,7 +12,15 @@ from langchain_chroma import Chroma
 # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
 # from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains import RetrievalQA
+
+# 関連度のしきい値(Chromaのデフォルト距離=L2、小さいほど類似)。
+# embeddingモデルによって距離のスケールが大きく異なるため provider ごとに用意している。
+# 実測値(documents/ のサンプルPDFで検証): huggingface は関連16〜18/無関係29〜33、google は関連0.69〜0.76/無関係0.88〜0.92。
+# 別のPDF/質問だと最適値は変わるので、環境変数 RELEVANCE_SCORE_THRESHOLD で上書き可能にしてある。
+_RELEVANCE_THRESHOLDS = {
+    "huggingface": 22.0,
+    "google": 0.8,
+}
 
 
 def load_pdf(pdf_path: str):
@@ -88,28 +96,46 @@ def build_vector_store(chunks, persist_directory: str | None = "./chroma_db"):
 
 def build_qa_chain(vector_store, model_name: str = "gemini-3.8-flash"):
     """
-    ステップ4+5: 質問に対して関連チャンクを検索し(retriever)、
-    LLMに渡して回答を生成する(QAチェーン)仕組みを組み立てる
+    ステップ4+5: 質問に対して関連チャンクを検索し、
+    関連度が低すぎる場合は検索結果を使わず「見つからなかった」と答える
+    QAチェーン(に相当する設定一式)を組み立てる
     """
     # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
     # llm = ChatAnthropic(model=model_name, temperature=0)
     llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
 
-    # retriever: 質問に関連するチャンクをベクトルDBから検索する役割
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})  # 上位3件を取得
+    provider = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
+    default_threshold = _RELEVANCE_THRESHOLDS.get(provider, 22.0)
+    score_threshold = float(os.getenv("RELEVANCE_SCORE_THRESHOLD", default_threshold))
 
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        return_source_documents=True,  # 回答の根拠となった原文も一緒に返す
+    print(f"[ステップ4-5] 質問応答チェーンを構築しました。(関連度しきい値: {score_threshold})")
+    return {"llm": llm, "vector_store": vector_store, "score_threshold": score_threshold}
+
+
+def ask_question(qa_chain, question: str, k: int = 3):
+    """
+    実際に質問を投げて回答を得る。
+
+    検索結果の関連度(距離)がしきい値を超えるもの、つまり実質的に
+    無関係なチャンクは除外し、1件も残らない場合はLLMを呼ばずに
+    「見つからなかった」と回答する(関連性のない内容をもとにした
+    でっち上げ回答を防ぐため)。
+    """
+    vector_store = qa_chain["vector_store"]
+    llm = qa_chain["llm"]
+    score_threshold = qa_chain["score_threshold"]
+
+    results = vector_store.similarity_search_with_score(question, k=k)
+    relevant_docs = [doc for doc, score in results if score <= score_threshold]
+
+    if not relevant_docs:
+        return "文書内に関連する内容が見つかりませんでした。", []
+
+    context = "\n\n".join(doc.page_content for doc in relevant_docs)
+    prompt = (
+        "以下はPDFから抽出した文書の抜粋です。この抜粋だけを根拠にして質問に答えてください。\n"
+        "抜粋の中に答えがない場合は「わかりません」と答えてください。\n\n"
+        f"文書の抜粋:\n{context}\n\n質問: {question}"
     )
-    print("[ステップ4-5] 質問応答チェーンを構築しました。")
-    return qa_chain
-
-
-def ask_question(qa_chain, question: str):
-    """
-    実際に質問を投げて回答を得る
-    """
-    result = qa_chain.invoke({"query": question})
-    return result["result"], result["source_documents"]
+    response = llm.invoke(prompt)
+    return response.content, relevant_docs
