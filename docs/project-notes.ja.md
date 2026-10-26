@@ -108,9 +108,9 @@ while True:
   現状、`.DS_Store` が既にgitにコミットされている。`venv/`、`.env`（APIキーが入っている）、今後生成される `chroma_db/` も、たまたままだコミットされていないだけ。
   → `.gitignore` を新規作成（`venv/`、`.env`、`chroma_db/`、`.DS_Store`、`__pycache__/` を除外）し、誤って追加済みの `.DS_Store` をgitから削除する。
 
-- [ ] **3. PDFが複数ある場合、無言で最初の1つだけを使う**（難易度：低、優先度：中）
-  場所：`main.py` 15〜21行目 `find_pdf_in_documents()`。`documents/` に複数のPDFがある場合、`pdf_files[0]` だけを使い、他のファイルが無視されたことをユーザーに伝えない。
-  → 「PDFがN個見つかりました。最初の1つを使用します：xxx.pdf」のような表示を追加する。
+- [x] **3. PDFが複数ある場合、無言で最初の1つだけを使う**（完了）
+  [main.py](../main.py) の `find_pdf_in_documents()` を `sorted(glob.glob(...))` に変更（実行のたびに選ばれるファイルが固定されるようにした。`glob` の戻り順は保証されないため）。複数のPDFが見つかった場合は「N個のPDFが見つかりました。最初の1つを使用します: xxx.pdf」と表示し、無視される他のファイル名も列挙するようにした。
+  ローカル検証：`documents/` に現在4つのPDF（元のuserAの職務経歴書＋新規生成した架空のテスト用職務経歴書3つ）がある状態で実際に実行し、表示が正常に出ること、選ばれるファイルがソート後の先頭で固定されることを確認した。
 
 - [x] **4. 非推奨のimportパスを使っている**（完了）
   もともと `rag_pipeline.py` では `langchain_community.vectorstores.Chroma` と `langchain_community.embeddings.HuggingFaceEmbeddings` を使っていたが、独立パッケージの `langchain-chroma==0.1.4` / `langchain-huggingface==0.1.2` に移行し、非推奨警告は出なくなった。

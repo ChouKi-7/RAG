@@ -107,9 +107,9 @@ while True:
   目前 `.DS_Store` 已经被提交进 git 了；`venv/`、`.env`（里面是 API key）、将来生成的 `chroma_db/` 目前只是"运气好"没被提交。
   → 新增 `.gitignore`（排除 `venv/`、`.env`、`chroma_db/`、`.DS_Store`、`__pycache__/`），并把已经误提交的 `.DS_Store` 从 git 里移除。
 
-- [ ] **3. 多个 PDF 时静默只取第一个**（难度：低，优先级：中）
-  位置：`main.py` 第 15-21 行 `find_pdf_in_documents()`，`documents/` 里有多个 PDF 时只取 `pdf_files[0]`，不会提示用户还有文件被忽略。
-  → 加一行提示："检测到 N 个 PDF，使用第一个：xxx.pdf"。
+- [x] **3. 多个 PDF 时静默只取第一个**（已完成）
+  [main.py](../main.py) 的 `find_pdf_in_documents()` 现在用 `sorted(glob.glob(...))`（保证每次运行选中的文件固定，不受 `glob` 返回顺序不确定的影响），检测到多个 PDF 时会打印提示："N個のPDFが見つかりました。最初の1つを使用します: xxx.pdf"，并列出被忽略的其他文件名。
+  本地验证：`documents/` 里现在有4个PDF（原来的 userA 简历 + 3份新生成的测试用假简历），实际运行确认提示文字正常显示，选中的文件固定是排序后的第一个。
 
 - [x] **4. 用了已废弃的 import 路径**（已完成）
   原来 `rag_pipeline.py` 用的是 `langchain_community.vectorstores.Chroma` 和 `langchain_community.embeddings.HuggingFaceEmbeddings`，已迁移到独立的 `langchain-chroma==0.1.4` / `langchain-huggingface==0.1.2` 包，不再触发 deprecation warning。

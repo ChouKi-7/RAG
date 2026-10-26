@@ -15,11 +15,14 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 def find_pdf_in_documents():
-    pdf_files = glob.glob("documents/*.pdf")
+    pdf_files = sorted(glob.glob("documents/*.pdf"))
     if not pdf_files:
         print("エラー: documents/ フォルダにPDFファイルが見つかりません。")
         print("質問したいPDFを documents/ フォルダに入れてから再実行してください。")
         exit(1)
+    if len(pdf_files) > 1:
+        print(f"{len(pdf_files)}個のPDFが見つかりました。最初の1つを使用します: {pdf_files[0]}")
+        print(f"（他のファイル: {', '.join(pdf_files[1:])}）\n")
     return pdf_files[0]
 
 
