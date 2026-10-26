@@ -1,3 +1,4 @@
+import logging
 import os
 import glob
 from dotenv import load_dotenv
@@ -10,6 +11,7 @@ from rag_pipeline import (
 )
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 def find_pdf_in_documents():

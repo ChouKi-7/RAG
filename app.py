@@ -7,15 +7,18 @@ PDFをアップロードして、その内容について質問できます。
 ローカル実行: streamlit run app.py
 """
 
+import logging
 import os
 import tempfile
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from rag_pipeline import load_pdf, split_into_chunks, build_vector_store, build_qa_chain, ask_question
+from rag_pipeline import load_pdf, split_into_chunks, build_vector_store, build_qa_chain, ask_question_stream
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="PDF質問応答 (RAG)", page_icon="📄")
 st.title("📄 PDF質問応答アプリ (RAG)")
@@ -50,6 +53,7 @@ if uploaded is not None and st.session_state.get("file_name") != uploaded.name:
             st.session_state.file_name = uploaded.name
             st.session_state.messages = []
         except Exception:
+            logger.exception("PDFの処理中にエラーが発生しました。file_name=%r", uploaded.name)
             st.error("PDFの処理中にエラーが発生しました。しばらくしてから再度お試しください。")
             st.session_state.pop("qa_chain", None)
             st.session_state.pop("file_name", None)
@@ -71,14 +75,14 @@ if "qa_chain" in st.session_state:
             st.markdown(question)
         with st.chat_message("assistant"):
             try:
-                with st.spinner("回答を生成しています..."):
-                    answer, sources = ask_question(st.session_state.qa_chain, question)
+                stream, sources = ask_question_stream(st.session_state.qa_chain, question)
+                answer = st.write_stream(stream)
             except Exception:
+                logger.exception("回答生成中にエラーが発生しました。question=%r", question)
                 answer = "回答の生成中にエラーが発生しました。しばらくしてから再度お試しください。"
                 st.error(answer)
                 sources = []
             else:
-                st.markdown(answer)
                 with st.expander(f"参照した箇所（{len(sources)}件）"):
                     for i, doc in enumerate(sources, 1):
                         page = doc.metadata.get("page")

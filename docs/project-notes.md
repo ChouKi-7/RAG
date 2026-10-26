@@ -165,21 +165,70 @@ while True:
   **注意**：这两个默认阈值是用 `documents/` 里那一份测试 PDF 实测校准的，换一份内容/语言差异很大的 PDF，这两个数字不一定还准，必要时要重新实测调整。
   本地验证：问"他叫什么"能正常检索并回答；问"今天东京天气怎么样"（跟 PDF 内容完全无关）正确返回"未找到相关内容"，没有瞎编。
 
-- [ ] **11. 没有流式输出，要等全部生成完才显示**（难度：低，优先级：中，纯体验优化）
-  现状：[app.py](../app.py) 里 `ask_question()` 是一次性拿到完整回答才显示，用户看到的是"转圈等待→突然整段文字出现"，体验不如主流 AI 产品的逐字流式输出。
-  → 换成流式调用（LangChain 支持 `.stream()`），配合 Streamlit 的 `st.write_stream()`，让回答像打字机一样逐字出现，改动量不大但体验提升明显。
+- [x] **11. 没有流式输出，要等全部生成完才显示**（已完成）
+  `rag_pipeline.py` 新增 `ask_question_stream()`（跟原来的 `ask_question()` 共用 `_retrieve_relevant_docs()`/`_build_prompt()` 两个抽出来的公共函数，不用写两遍逻辑），返回 `(文本片段的生成器, 来源列表)`。[app.py](../app.py) 改用 `st.write_stream(stream)` 显示回答。
+  验证：用"不相关问题"分支测试过生成器结构正确、能瞬间返回（不碰网络）；真正流式的网页视觉效果因为每次调用都要等 2 分钟以上（见第15条），还没来得及人工完整验证一次，已记录进 [test-cases/unit-test-cases.md](../test-cases/unit-test-cases.md) 的 TC-M03，标记为"待验证"。
+  `main.py`（CLI版）没有改，还是用原来的 `ask_question()`，不影响。
 
-- [ ] **12. 完全没有测试**（难度：低~中，优先级：中）
-  现状：项目里没有任何测试代码，每次改动只能靠手动跑一遍 `python main.py` 或网页点一遍来验证，容易漏掉边界情况（之前日语检索失效、向量库重复累积这些问题，都是手动测试撞见的，不是系统性发现的）。
-  → 从简单的纯函数开始写单元测试，比如 `split_into_chunks()` 这种不依赖网络/API 的函数，验证切块数量、重叠长度是否符合预期；用 `pytest` 就够了，不用上复杂的测试框架。
+- [x] **12. 完全没有测试**（已完成）
+  新增 [tests/test_rag_pipeline.py](../tests/test_rag_pipeline.py)，用 `pytest` 覆盖 `split_into_chunks()`、`_build_prompt()`、`_RELEVANCE_THRESHOLDS`、`NOT_FOUND_MESSAGE` 这些不依赖网络/API 的纯逻辑，一共10个用例，本地跑全部通过（约1秒）。完整的用例列表和预期/实际结果见新建的 [test-cases/unit-test-cases.md](../test-cases/unit-test-cases.md)（单独开的文件夹，不混进 `docs/`）。
+  新增 `requirements-dev.txt`（只放 `pytest`、`ruff`，运行时不需要，纯开发/CI用）。
+  刻意没测的部分：`ask_question`/`ask_question_stream`/`build_qa_chain` 这些要真实调用 Gemini API 的，不适合进自动化单元测试（没 key、不稳定、费额度），原因写在 test-cases 文档里了。
 
-- [ ] **13. 没有 CI（持续集成）**（难度：低，优先级：中偏低）
-  现状：代码推送到 GitHub 后不会自动跑任何检查，全靠自己记得手动测试。
-  → 加一个简单的 GitHub Actions workflow，每次 push 自动跑 lint（比如 `ruff`）和第12条写的单元测试，这是比较基础、工程上常见的规范化操作，配合第12条一起做性价比最高。
+- [x] **13. 没有 CI（持续集成）**（已完成）
+  在已有的 [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) 里加了一个 `test` job（跑 `ruff check .` + `pytest tests/ -v`），并且让原来的 `build-and-deploy` job 加上 `needs: test`——**测试/lint 不通过，不会触发后面的部署**，这是之前讨论"CI 和 CD 的区别"时提到的、真正完整的闭环（之前只有部署自动化，没有质量把关这一环，现在补上了）。
+  验证：本地建了一个全新的虚拟环境，只装 `requirements-deploy.txt` + `requirements-dev.txt`（模拟 CI 的真实环境，不是直接用本地已经装了一堆包的 venv），`ruff check .` 和 `pytest` 都确认能跑通，避免"本地能跑、CI 跑不了"的坑。
 
-- [ ] **14. 日志只用 `print`，没有分级别**（难度：低，优先级：低）
-  现状：[rag_pipeline.py](../rag_pipeline.py) 里所有状态输出都是 `print(f"[ステップ...] ...")`，混杂在一起，生产环境里没法方便地只看错误、或者关掉调试信息。
-  → 换成 Python 标准库的 `logging` 模块，分 `INFO`/`WARNING`/`ERROR` 等级别，云端部署时也能更方便地按级别过滤日志（之前排查 504 超时问题时，Log stream 里一堆无害的 `print` 输出混在真正的报错里，增加了排查难度，这个问题换成 `logging` 后能缓解）。
+- [x] **14. 日志只用 `print`，没有分级别**（已完成）
+  [rag_pipeline.py](../rag_pipeline.py) 里原来 `print(f"[ステップ...] ...")` 的状态输出，全部换成 `logger.info(...)`（`logger = logging.getLogger(__name__)`）；另外在 `_retrieve_relevant_docs()` 里新增了一条 `logger.warning(...)`，检索不到相关内容时会把问题、阈值、实际检索分数一起记下来，方便以后调阈值。
+  [app.py](../app.py) 的两处 `except Exception` 里加了 `logger.exception(...)`，把真实报错堆栈记进日志（之前只给用户看友好提示，真实错误信息完全没留痕迹，运维没法排查）。
+  [main.py](../main.py) 里**没有改**——它那些 `print` 都是真正的 CLI 用户界面文字（问答交互、错误提示），不是内部状态日志，不属于这次改动范围；但加了一行 `logging.basicConfig(level=logging.INFO, ...)`，保证 `rag_pipeline.py` 里改成 `logger.info()` 的那些状态提示，CLI 用户依然能看到（不加这行的话，Python 默认不显示 INFO 级别日志，会变成一个无声的功能倒退）。
+  `app.py` 同样加了 `logging.basicConfig(...)`，格式带时间戳（`%(asctime)s %(levelname)s %(name)s: %(message)s`），方便云端 Log stream 里按时间/级别定位问题。
+  本地验证：跑 CLI 版测试"不相关问题"，确认 `INFO` 正常显示 pipeline 各步骤状态、`WARNING` 在检索不到内容时正确打印出具体分数，用户可见的交互文字完全没受影响。
+
+- [x] **15. 生成回答经常异常缓慢，且免费额度一天只有 20 次**（已大幅缓解，换模型解决）
+  **现状（根因已更新，比最初判断更严重）**：做检索准确率评测时连续测试，观察到这样的规律：
+  ```
+  第1题  223.6s  成功
+  第2题  155.9s  成功
+  第3题  229.7s  成功
+  第4题  367.2s  成功（耗时持续走高）
+  第5题  235.1s  成功
+  第6题  直接报错 429 ResourceExhausted
+  ```
+  第6题的完整报错：
+  ```
+  google.api_core.exceptions.ResourceExhausted: 429 You exceeded your current quota...
+  Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests
+  limit: 20, model: gemini-3.8-flash
+  description: Generate content requests per day limit exceeded on Free Tier
+  Please retry in 1h36m20s
+  ```
+  **真正的根因：`gemini-3.8-flash` 这个模型的免费层，每天只给 20 次请求额度（`generate_content_free_tier_requests`，limit: 20/day）。**
+  这彻底改写了之前的诊断——之前以为纯粹是"gRPC 库连接不稳定导致随机变慢"，现在看更可能是：**越接近这个每日20次的硬上限，Google 服务器会先"软性拖慢"响应（排队/降速），额度真正耗尽后才直接 429 硬拒绝**。耗时数据从 223s 一路涨到 367s 的趋势，跟这个解释吻合。
+  **当前状态**：今天的额度已经被测试跑光了，要等官方提示的 1小时36分钟后，或者等到第二天（太平洋时间零点）配额重置，才能继续调用。
+  **之前试过但失败的修复**：给 `ChatGoogleGenerativeAI`/`GoogleGenerativeAIEmbeddings` 加 `transport="rest"` 参数，想绕开 gRPC——结果认证方式直接崩了（变成找 Google Cloud 的"默认凭证"而不是 `GOOGLE_API_KEY`，报 `DefaultCredentialsError`），已回滚。这个修复思路现在看也没对症，因为真正问题是配额不是协议。
+  **解决方向（按优先级）**：
+  1. **最直接、最该先做的**：去 https://ai.google.dev/gemini-api/docs/rate-limits 查一下**不同模型**各自的免费层每日额度——`gemini-3.8-flash` 给20次可能是因为它是较新/预览性质的模型，换成 `gemini-2.5-flash` 或 `gemini-2.0-flash` 这类更成熟的型号，免费额度大概率高得多（常见的免费层每日额度是几百到上千次）。**这应该是下一步第一个要验证的事**，可能不需要大改代码，只改 `build_qa_chain()` 里的默认 `model_name` 参数。
+  2. **治标方案**：给 `ask_question()`/`ask_question_stream()` 加明确的"额度已用完，请稍后再试"提示（捕获 `ResourceExhausted` 异常单独处理，跟第8条已有的通用错误处理区分开，给用户更准确的信息），而不是让用户对着转圈等待或者看到一堆英文报错
+  3. **真正的根治方案（如果1解决不了）**：升级到 Google 官方推荐的新包 `google-genai`，但涉及多个依赖包连锁升级，可能跟项目锁定的 `langchain==0.3.7` 系列冲突，工作量不小，优先级低于方向1
+  4. **换掉 Gemini**：改用 Groq 等其他免费方案——更大的改动，等方向1验证无效后再考虑
+  **这是目前整个项目里影响最严重的问题**（不只是体验问题，是"免费额度一天只能问20次"这种硬性可用性限制），比其他待办都更值得优先处理，建议排在第3、11、12、13、14 这些之前先解决，而且第1步验证成本很低，应该马上试。
+
+  **后续更新：方向1 验证完成，效果显著**
+  先试了 `gemini-2.5-flash`——结果**直接 404**：`This model models/gemini-2.5-flash is no longer available to new users`，Google 官方自己报错建议换成 `gemini-3.8-flash`（也就是我们正在用的那个），说明这条路走不通，`gemini-2.5-flash` 虽然在"列出模型"接口里还能查到，但实际调用被拒绝。
+  用 `GET https://generativelanguage.googleapis.com/v1beta/models?key=...` 查了这个 key 实际能访问哪些带 "flash" 的模型，列出一批候选（`gemini-3.1-flash-lite`、`gemini-3.5-flash-lite`、`gemini-2.5-flash-lite`、`gemini-flash-lite-latest` 等 "lite" 系列），换了其中的 **`gemini-3.1-flash-lite`** 测试：
+  ```
+  共测6次调用，全部成功：
+  5.0s / 4.6s / 13.7s / 1.8s / 3.2s / 0.5s
+  平均耗时 4.76s，最慢 13.7s
+  ```
+  对比之前 `gemini-3.8-flash` 的 150~367秒，**快了几十倍**，而且回答准确率没有下降（不相关问题依然正确识别为"未找到"）。
+  **已把 `build_qa_chain()` 的默认 `model_name` 改成 `gemini-3.1-flash-lite`**。
+  **还没验证的部分**：
+  - 这个模型的**每日请求额度**具体是多少还不知道（没有刻意测到打满），"lite" 系列按经验通常比标准版额度更高，但没有实测确认具体数字，不排除以后用多了同样会遇到 429
+  - 还没拿着这个新模型重新跑一遍完整的 13 题检索准确率评测（之前只测了关键的几题），如果想要更严谨的数据，可以找时间补一次完整评测
+  - Azure 云端那边的 Dockerfile/部署配置目前**还是指向旧的默认值**（代码改的是本地文件，还没重新构建镜像、推送、更新 Azure），线上版本还没用上这个更快的模型，需要走一遍"改代码→reBuild镜像→push→az containerapp update"的流程（现在有 CI/CD 了，直接 `git push` 应该就会自动完成）
 
 ---
 
