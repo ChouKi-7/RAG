@@ -26,6 +26,13 @@ _RELEVANCE_THRESHOLDS = {
     "google": 0.8,
 }
 
+# ベクトルDB全体のチャンク数がこの値以下の場合、関連度フィルタリングをスキップする。
+# 候補が極端に少ない(=文書自体が短い)場合、フィルタリングの効果が薄く誤って
+# 本来関連する内容まで弾いてしまうリスクの方が高いため(parameter-tuning.md 第二部参照)。
+# LLM側にも「抜粋に答えがなければ『わかりません』と答える」という指示があるので、
+# 完全にフィルタをなくしても、でっち上げ回答への保護は二重に残る。
+SMALL_DOC_CHUNK_THRESHOLD = 2
+
 
 def load_pdf(pdf_path: str):
     """
@@ -118,9 +125,18 @@ def build_qa_chain(vector_store, model_name: str = "gemini-3.1-flash-lite"):
     provider = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
     default_threshold = _RELEVANCE_THRESHOLDS.get(provider, 22.0)
     score_threshold = float(os.getenv("RELEVANCE_SCORE_THRESHOLD", default_threshold))
+    total_chunks = vector_store._collection.count()
 
-    logger.info("[ステップ4-5] 質問応答チェーンを構築しました。(関連度しきい値: %s)", score_threshold)
-    return {"llm": llm, "vector_store": vector_store, "score_threshold": score_threshold}
+    logger.info(
+        "[ステップ4-5] 質問応答チェーンを構築しました。(関連度しきい値: %s, 総チャンク数: %d)",
+        score_threshold, total_chunks,
+    )
+    return {
+        "llm": llm,
+        "vector_store": vector_store,
+        "score_threshold": score_threshold,
+        "total_chunks": total_chunks,
+    }
 
 
 NOT_FOUND_MESSAGE = "文書内に関連する内容が見つかりませんでした。"
@@ -133,9 +149,15 @@ def _retrieve_relevant_docs(qa_chain, question: str, k: int):
     """
     vector_store = qa_chain["vector_store"]
     score_threshold = qa_chain["score_threshold"]
+    total_chunks = qa_chain.get("total_chunks", k + 1)
 
     results = vector_store.similarity_search_with_score(question, k=k)
-    relevant_docs = [doc for doc, score in results if score <= score_threshold]
+
+    if total_chunks <= SMALL_DOC_CHUNK_THRESHOLD:
+        # 候補が少ない短い文書は、しきい値でのフィルタリングをスキップする。
+        relevant_docs = [doc for doc, _ in results]
+    else:
+        relevant_docs = [doc for doc, score in results if score <= score_threshold]
 
     if not relevant_docs:
         logger.warning(
