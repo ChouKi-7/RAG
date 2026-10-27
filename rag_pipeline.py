@@ -37,7 +37,7 @@ def load_pdf(pdf_path: str):
     return documents
 
 
-def split_into_chunks(documents, chunk_size: int = 500, chunk_overlap: int = 50):
+def split_into_chunks(documents, chunk_size: int = 800, chunk_overlap: int = 80):
     """
     ステップ2: テキストを小さな断片(チャンク)に分割する
 
