@@ -7,6 +7,7 @@ RAG(検索拡張生成)のコア処理をまとめたファイルです。
 
 import logging
 import os
+import uuid
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -79,7 +80,14 @@ def build_vector_store(chunks, persist_directory: str | None = "./chroma_db"):
     embeddings = get_embeddings()
 
     if persist_directory is None:
-        vector_store = Chroma.from_documents(documents=chunks, embedding=embeddings)
+        # collection_name を明示的に一意にしないと、同一プロセス内で複数回呼び出した際に
+        # (persist_directory を指定しない場合のデフォルトコレクション名が固定のため)
+        # 以前の呼び出しで作ったドキュメントが新しいベクトルDBに混入するバグがあった。
+        vector_store = Chroma.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            collection_name=f"session-{uuid.uuid4()}",
+        )
         logger.info("[ステップ3] ベクトルDBをメモリ上に作成しました。")
         return vector_store
 

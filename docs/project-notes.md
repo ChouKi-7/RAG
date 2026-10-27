@@ -263,4 +263,35 @@ while True:
 
 ---
 
+- [x] **16.（🔴 严重 bug，已修复）`build_vector_store(persist_directory=None)` 在同一进程内会把不同文档的向量库"串"在一起**（难度：低，影响：高）
+
+  **发现经过**：为了对比"同一份简历、不同 chunk_size"和"同一 chunk_size、不同简历"的准确率，写了个评测脚本，在同一个 Python 进程里连续调用多次 `build_vector_store(chunks, persist_directory=None)`（分别传入 userA 简历和另外3份测试用假简历）。广度测试那组数据准确率低得不正常（田中健一25%、鈴木美咲50%、高橋大輔25%），其中最可疑的一条：问田中健一（厨师）"持有什么资格"，**回答的是 AI-900/AZ-900/G検定——这是 userA 的资格，根本不在田中健一那份文档里**。
+
+  **验证过程**：写了个最小复现脚本，在同一进程里先后建两个完全无关的迷你文档（"苹果"、"汽车"）的向量库，`persist_directory=None`：
+  ```python
+  vs1 = build_vector_store([Document("...苹果...")], persist_directory=None)
+  vs2 = build_vector_store([Document("...汽车...")], persist_directory=None)
+  # vs2 应该只含"汽车"这1条，实际 vs2._collection.count() 返回 2
+  # 用 vs2 搜"苹果"，真的搜到了"苹果"那段内容
+  ```
+  确认 bug 真实存在。
+
+  **根因**：`Chroma.from_documents()` 有个 `collection_name` 参数，**不手动指定的话默认值固定是 `'langchain'`**。`persist_directory=None` 时底层用的是进程内的临时 Chroma 客户端，只要 collection 名字没变，同一进程里多次调用会不断往同一个 collection 里追加数据，不会自动清空重建。
+
+  **影响范围（重要）**：`app.py`（Web版）的 `build_vector_store(chunks, persist_directory=None)` 分支正是这个用法——**只要 Azure 上那个 Streamlit 进程不重启，不同用户/不同次上传的 PDF，内容会在向量库里持续累积、互相"串台"**，后面的人提问有可能检索到之前别人上传文档的内容。这不只是正确性 bug，上传的如果是简历、合同这类敏感文档，还是一个**真实的隐私泄露风险**。
+
+  **修复**：给每次调用传一个唯一的 `collection_name`（用 `uuid.uuid4()` 生成），保证每次"内存向量库"都是真正独立、互不干扰的：
+  ```python
+  vector_store = Chroma.from_documents(
+      documents=chunks,
+      embedding=embeddings,
+      collection_name=f"session-{uuid.uuid4()}",
+  )
+  ```
+  修复后用同样的"苹果/汽车"脚本重新验证，`vs2` 记录数正确变回1条，搜"苹果"搜不到了。单元测试、ruff 都重新跑过，没有破坏其他功能。
+
+  **连带影响：这次做的"调参对比"评测数据全部作废**，需要在修复后重新跑一遍才能得出可信结论（深度测试三组 chunk_size 之所以"准确率完全一样"，很可能是因为后面几组的向量库里混进了前面组的数据，掩盖了真实差异，不是"chunk_size真的没影响"这个结论本身可信）。重新评测的结果见下一条。
+
+---
+
 *这份笔记由 Claude 根据 2026-10-01 的项目状态生成，代码一旦改动，部分描述可能过时，建议对照当前代码核对。*
