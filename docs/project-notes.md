@@ -309,4 +309,35 @@ while True:
 
 ---
 
+- [x] **18.（🔴 严重 bug，已修复）CI/CD 部署用固定的 `:latest` 标签，Azure 可能一直没真正拉取新镜像**（难度：低，影响：高）
+
+  **发现经过**：GitHub Actions 的 `test`/`build-and-deploy` 两个 job 一直显示绿色、运行成功，但不确定线上 Azure 的镜像是不是真的更新了。查了一下 Azure 那边的 revision 记录：
+  ```bash
+  az containerapp revision list --name rag-starter-app --resource-group rag-starter-rg -o table
+  ```
+  结果**只有一条 revision，创建时间是最早那次手动部署的时间（2026-10-08），从那以后 CI/CD 跑了好多次，一次新的 revision 都没产生过**。
+
+  **根因**：Azure Container Apps 判断"要不要创建新 revision、要不要重新拉镜像"，依据的是 `az containerapp update --image ...` 传的**镜像地址字符串本身有没有变化**，不会去检查这个标签背后的实际内容变没变。`deploy.yml` 里一直用固定的 `ccck1/rag-starter:latest`，这个字符串从第一次部署到现在从未变过——所以哪怕 Docker Hub 上 `:latest` 标签背后的镜像内容已经换了好几轮（包括这次的 `chunk_size=800`、阈值跳过逻辑等改动），**Azure 那边"看字符串没变"，就不会触发更新，一直在跑10月8日那次最初部署的老镜像**。
+
+  **影响范围**：这意味着**从第一次部署成功以后，所有通过 CI/CD 推送的代码改动（包括第11-18条里的大部分修复），可能从来没有真正同步到 Azure 线上环境**，哪怕 GitHub Actions 全程显示绿色成功。这是 CI/CD 流程里一个很隐蔽的"假成功"陷阱。
+
+  **修复**：[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) 构建镜像时，除了 `:latest` 这个人类可读的标签，额外打一个**"日期+commit短哈希"格式的唯一标签**（比如 `2026-10-27-a3f9c21`），`az containerapp update --image` 也改用这个唯一标签而不是 `:latest`：
+  ```yaml
+  - name: Generate image tag
+    id: tag
+    run: echo "tag=$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+  ...
+  tags: |
+    ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:latest
+    ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:${{ steps.tag.outputs.tag }}
+  ...
+  az containerapp update ... --image ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:${{ steps.tag.outputs.tag }}
+  ```
+  这样每次提交，镜像地址字符串都真正不一样，Azure 才会可靠地识别出"这次是真的要换版本"，创建新 revision、拉取新镜像。只用纯日期的话，同一天推送多次会互相覆盖、标签字符串不变，照样会复现这个 bug，所以额外拼上 commit 短哈希保证唯一性。
+  **注意**：日期用的是 `date -u`（UTC时间），GitHub Actions 虚拟机默认时区是 UTC 不是 JST，日本时间凌晨0点到早上9点之间推送，标签上的日期会显示"前一天"。
+
+  **还没做的事**：这个修复还没提交推送，推送后需要去 Azure 确认 `az containerapp revision list` 真的出现了第二条 revision，才算验证通过。
+
+---
+
 *这份笔记由 Claude 根据 2026-10-01 的项目状态生成，代码一旦改动，部分描述可能过时，建议对照当前代码核对。*

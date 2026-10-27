@@ -43,13 +43,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Generate image tag
+        id: tag
+        # 日付(UTC) + commitの短縮SHA。:latest だけだと Azure Container Apps が
+        # イメージの「文字列」が変わったかどうかでしか新リビジョンを作るか判断しない
+        # (タグの中身が変わっても文字列が同じなら気づかない)ため、
+        # デプロイには一意なタグを別途使う。日付だけだと同じ日に複数回pushした場合に
+        # 上書きされて同じ問題が再発するため、短縮SHAを組み合わせて一意性を保証する。
+        run: echo "tag=$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:${{ steps.tag.outputs.tag }}
 
       - name: Azure Login
         uses: azure/login@v2
@@ -63,4 +74,4 @@ jobs:
             az containerapp update \
               --name rag-starter-app \
               --resource-group rag-starter-rg \
-              --image ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:latest
+              --image ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:${{ steps.tag.outputs.tag }}

@@ -310,4 +310,36 @@ while True:
 
 ---
 
+- [x] **18.（🔴 重大バグ、修正済み）CI/CDデプロイが固定の `:latest` タグを使っており、Azureが実際には新しいイメージを取得していなかった可能性**（難易度：低、影響度：高）
+
+  **発見の経緯**：GitHub Actionsの `test`/`build-and-deploy` の両jobはずっと緑（成功）表示だったが、本番Azure側のイメージが本当に更新されているか不確かだった。Azure側のリビジョン記録を確認：
+  ```bash
+  az containerapp revision list --name rag-starter-app --resource-group rag-starter-rg -o table
+  ```
+  結果、**リビジョンは1件しかなく、作成時刻は最初に手動でデプロイした時刻（2026-10-08）のまま。それ以降CI/CDが何度も実行されたにもかかわらず、新しいリビジョンは一度も作られていなかった**。
+
+  **根本原因**：Azure Container Appsが「新しいリビジョンを作るか、イメージを再取得するか」を判断する基準は、`az containerapp update --image ...` に渡す**イメージのアドレス文字列そのものが変わったかどうか**であり、そのタグの裏側にある実際の中身が変わったかはチェックしない。`deploy.yml` ではずっと固定の `ccck1/rag-starter:latest` を使っており、この文字列は最初のデプロイから一度も変わっていなかった——そのため、Docker Hub上の `:latest` タグの裏側にあるイメージの中身が何度も更新されていても（今回の `chunk_size=800` やしきい値スキップロジックの変更を含む）、**Azure側は「文字列が変わっていない」と見なし、更新をトリガーせず、10月8日の最初のデプロイの古いイメージをずっと動かし続けていた**。
+
+  **影響範囲**：つまり**最初のデプロイが成功して以降、CI/CD経由でpushされたコードの変更（項目11〜18のほとんどの修正を含む）は、GitHub Actionsが全工程で緑（成功）表示だったにもかかわらず、本番Azure環境に実際には反映されていなかった可能性がある**。これはCI/CDフローにおける非常に見えにくい「偽の成功」の落とし穴である。
+
+  **修正**：[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) でイメージをビルドする際、人間が読みやすい `:latest` タグに加えて、**「日付＋commit短縮SHA」形式の一意なタグ**（例：`2026-10-27-a3f9c21`）を別途付与し、`az containerapp update --image` も `:latest` ではなくこの一意なタグを使うように変更した：
+  ```yaml
+  - name: Generate image tag
+    id: tag
+    run: echo "tag=$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+  ...
+  tags: |
+    ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:latest
+    ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:${{ steps.tag.outputs.tag }}
+  ...
+  az containerapp update ... --image ${{ secrets.DOCKERHUB_USERNAME }}/rag-starter:${{ steps.tag.outputs.tag }}
+  ```
+  日付だけだと、同じ日に複数回pushした場合にタグが上書きされて文字列が変わらず、同じバグが再発してしまうため、commitの短縮SHAを組み合わせて一意性を保証している。
+  **注意**：日付の生成には `date -u`（UTC時刻）を使用している。GitHub Actionsの仮想マシンのデフォルトタイムゾーンはUTCでJSTではないため、日本時間の深夜0時〜朝9時頃にpushすると、タグに表示される日付が「前日」になる。
+  これにより、コミットのたびにイメージのアドレス文字列が確実に変わるようになり、Azureが「今回は本当にバージョンが変わった」と確実に認識し、新しいリビジョンを作成してイメージを再取得するようになる。
+
+  **まだやっていないこと**：この修正はまだコミット・プッシュしていない。プッシュ後、`az containerapp revision list` で実際に2件目のリビジョンが現れることを確認して、初めて検証完了となる。
+
+---
+
 *このノートは2026-10-01時点のプロジェクト状態をもとにClaudeが作成したもの。コードが変更されると内容が古くなる可能性があるため、現在のコードと照らし合わせて確認することを推奨する。*
