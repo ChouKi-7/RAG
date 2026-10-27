@@ -8,3 +8,8 @@ chromadb==0.5.23
 pypdf==5.1.0
 python-dotenv==1.0.1
 streamlit==1.40.1
+# streamlit の st.write_stream() が内部で pyarrow を使って型判定する。
+# langchain-community 等が numpy<2.0 を要求するため、pyarrow は numpy 2.0 を
+# 要求しない古めのバージョンに固定する(固定しないと最新版が入ってクラッシュする)。
+# ローカル(Mac/Python 3.13)でも動くバージョンに requirements.txt と揃えてある。
+pyarrow==18.1.0

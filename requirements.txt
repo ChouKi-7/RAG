@@ -9,3 +9,7 @@ chromadb==0.5.23
 pypdf==5.1.0
 sentence-transformers==3.3.1
 python-dotenv==1.0.1
+streamlit==1.40.1
+# st.write_stream() が内部でpyarrowを使うため、numpy<2.0系と衝突しない古いバージョンに固定
+# (固定しないと最新版が入ってクラッシュする。詳細は docs/project-notes.md 参照)
+pyarrow==18.1.0

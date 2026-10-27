@@ -340,4 +340,29 @@ while True:
 
 ---
 
+- [x] **19.（🔴 严重 bug，已修复）线上版本一提问就报错，根因是 `pyarrow` 和 `numpy` 版本冲突**（难度：中，影响：高）
+
+  **发现经过**：第18条那个"镜像没真正更新"的问题修复后，Azure 上终于出现了新的 revision，但实际打开网页测试，**每问一个问题都返回"回答の生成中にエラーが発生しました"**（第8条做的通用错误提示）。去 Azure 的 Log stream 查真实报错：
+  ```
+  File ".../streamlit/dataframe_util.py", line 1155, in determine_data_format
+      import pyarrow as pa
+  ImportError: pyarrow requires NumPy 2.0 or newer, found 1.26.4
+  ```
+
+  **根因**：第11条加的 `st.write_stream()`（流式输出）内部会调用 Streamlit 自己的 `is_dataframe_like()` 判断"这个内容是不是表格数据"，这一步需要 `import pyarrow`。[requirements-deploy.txt](../requirements-deploy.txt) 没有锁定 `pyarrow` 版本，装的是最新版（约26.x），这个版本**要求 `numpy>=2.0`**；但 `langchain-community`/`chromadb` 这些包间接把 `numpy` 锁定在了 `<2.0`（实测装出来是 `1.26.4`）——两边要求互相矛盾，`pyarrow` 一导入就崩溃，**导致部署后所有提问全部失败**。
+
+  **这暴露了一个测试覆盖的真实缺口**：[test-cases/unit-test-cases.md](../test-cases/unit-test-cases.md) 里的 TC-M03（"网页端流式显示人工目测"）当时就标记成"⏳ 待验证"，一直没有真正用浏览器点开测试过完整的流式输出流程，只测过不走网络的"未找到"分支——这个漏测的缺口，这次在线上真实暴露了。
+
+  **排查+修复过程**：
+  1. 本地用一个全新虚拟环境，只装 `requirements-deploy.txt` 里的包，确认能复现这个问题（`pyarrow` 装的是最新版、`numpy` 是 `1.26.4`，导入直接报同样的错）
+  2. 关键教训：**本地电脑是 Mac + Python 3.13，部署用的 Docker 镜像是 Linux + Python 3.11，两者能装的包版本不完全一样**——直接用本地环境测不一定准，于是改用 `docker run --platform linux/amd64 python:3.11-slim` 来验证，确保跟真实部署环境完全一致
+  3. 试了几个 `pyarrow` 版本：`14.0.2` 在部署环境（Linux/3.11）能装且能用，但在本地 Mac/Python 3.13 环境没有现成的预编译包，要从源码编译会失败；换成 **`18.1.0`**，两边环境都验证通过（本地 Mac + 部署 Linux 都能正常导入、`is_dataframe_like()` 调用不报错）
+  4. 顺带发现 [requirements.txt](../requirements.txt)（本地开发用）里**压根没有 `streamlit`**，本地想跑 `streamlit run app.py` 之前会直接报模块找不到——一并补上了
+
+  **修复**：`requirements.txt` 和 `requirements-deploy.txt` 都加上 `pyarrow==18.1.0`（锁定到一个 `numpy<2.0` 环境下也能正常工作、且两边环境都有预编译包的版本），`requirements.txt` 另外补上 `streamlit==1.40.1`。
+
+  **还没做的事**：这次验证停留在"用 Docker 容器模拟部署环境、确认 `pyarrow`/`numpy`/`streamlit` 能正常 import、`is_dataframe_like()` 调用不崩"这个层面，**还没有真正用浏览器打开本地或线上网页、完整点一遍"上传PDF→提问→看到流式回答"这个全流程**——也就是说 TC-M03 这次还是没有被真正地、用浏览器目测地验证过，只是绕过了会导致崩溃的那个具体依赖冲突。这个修复还没提交推送，推送后要记得去 Azure 实际打开网页测试一次。
+
+---
+
 *这份笔记由 Claude 根据 2026-10-01 的项目状态生成，代码一旦改动，部分描述可能过时，建议对照当前代码核对。*
