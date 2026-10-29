@@ -1,6 +1,5 @@
 # rag-starter Azureデプロイノート
 
-> 対象：デプロイを学び始めたばかりで、まだ Docker / Azure の概念に不慣れな自分へ。
 > 使い方：デプロイがどこまで進んだか、なぜその手順をやるのか忘れたら、これを読めば思い出せる。
 
 ---
@@ -161,7 +160,7 @@
   Retrying ... as it raised DeadlineExceeded: 504 Deadline expired before operation could complete.
   ```
   原因：`langchain_google_genai` が内部で使用しているのは既にメンテナンス終了した `google.generativeai` パッケージ（gRPCプロトコルを使用）。gRPCはAzureとGoogleサーバー間で時々接続が不安定・タイムアウトすることがあり、ライブラリ内蔵の自動リトライ機構は最終的に成功するものの、非常に遅くなる。
-  **試した修正**：`ChatGoogleGenerativeAI` / `GoogleGenerativeAIEmbeddings` に `transport="rest"` パラメータを追加——**結果はさらに悪化**。認証方式が `GOOGLE_API_KEY` ではなくGoogle Cloudの「デフォルト認証情報」を探す方式に変わってしまい、`DefaultCredentialsError` で接続自体ができなくなった。この変更は取り消し済みで、コードは元の状態に戻してある。
+  **試した修正**：`ChatGoogleGenerativeAI` / `GoogleGenerativeAIEmbeddings` に`transport="rest"` パラメータを追加——**結果はさらに悪化**。認証方式が `GOOGLE_API_KEY` ではなくGoogle Cloudの「デフォルト認証情報」を探す方式に変わってしまい、`DefaultCredentialsError` で接続自体ができなくなった。この変更は取り消し済みで、コードは元の状態に戻してある。
   **本当の長期的な解決策**（今後時間がある時にやる、優先度低）：Google公式推奨の新パッケージ `google-genai`（新バージョンの `langchain-google-genai` とセット）にアップグレードする。ただし複数の依存パッケージのバージョンが連鎖的に上がる可能性があり、プロジェクトで固定している `langchain==0.3.7` 系統と衝突する可能性があるため、別途時間を取って検証する必要があり、今ついでにやることはお勧めしない。
 
 - [ ] **9.（任意）カスタムドメイン / HTTPS証明書の設定**（難易度：中、優先度低、もう少し本格的にしたい時にやればよい）

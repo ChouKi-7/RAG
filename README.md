@@ -13,10 +13,12 @@ Azure Container Apps 上にデプロイ済みです。PDFをアップロード�
 
 ## 主な機能
 
-- PDFアップロード＋チャット形式のWeb UI(Streamlit)
+- PDFアップロード＋チャット形式のWeb UI(Streamlit、ストリーミング出力対応)
 - コマンドライン版(CLI)も用意
 - 日本語・中国語・英語などの多言語文書に対応(多言語embeddingモデル使用)
+- 関連度スコアによるフィルタリングで、文書に根拠のない回答を抑制
 - Dockerコンテナ化し、Azure Container Apps にデプロイ済み
+- GitHub Actionsによるテスト・ビルド・デプロイの自動化(CI/CD、テスト失敗時はデプロイをブロック)
 - ローカル実行は無料(埋め込みは無料のローカルモデル、生成はGoogle Geminiの無料枠を利用)
 
 ## 使用技術
@@ -28,6 +30,8 @@ Azure Container Apps 上にデプロイ済みです。PDFをアップロード�
 | ベクトルDB | Chroma |
 | Web UI | Streamlit |
 | コンテナ / デプロイ | Docker, Azure Container Apps |
+| CI/CD | GitHub Actions |
+| テスト / Lint | pytest, ruff |
 
 ## 仕組み(RAGの5ステップ)
 
@@ -82,28 +86,38 @@ streamlit run app.py
 
 Web版(`app.py`)をDockerコンテナ化し、Azure Container Apps(Consumptionプラン)にデプロイしています。イメージは Docker Hub でホストし、アクセスがない時はインスタンスを自動的に0台までスケールダウンするよう設定しています。
 
-詳細な手順は [docs/azure-deploy-notes.ja.md](docs/azure-deploy-notes.ja.md) を参照してください。
+`main`ブランチへのpushをトリガーに、GitHub Actionsが lint・単体テスト → Dockerイメージのビルド・push → Azure Container Appsへの反映 を自動実行します(テスト・lintが通らない場合はデプロイされません)。
+
+詳細な手順は [docs/azure-deploy-notes.ja.md](docs/azure-deploy-notes.ja.md)(デプロイ)、[docs/cicd-notes.ja.md](docs/cicd-notes.ja.md)(CI/CD構築)を参照してください。
 
 ## プロジェクト構成
 
 ```
 rag-starter/
-├── README.md                このファイル
-├── requirements.txt          ローカル実行用の依存ライブラリ一覧
-├── requirements-deploy.txt   クラウドデプロイ用の依存ライブラリ一覧(軽量版)
-├── .env.example              APIキー設定のテンプレート
-├── main.py                   CLI版メインプログラム
-├── app.py                    Web版(Streamlit)メインプログラム
-├── Dockerfile                 クラウドデプロイ用のコンテナ定義
-├── rag_pipeline.py           RAGの処理ロジック(コア実装)
-├── documents/                 質問対象のPDFを置く場所
-└── docs/                      実装・デプロイの詳細ノート(日本語/中国語)
+├── README.md                 このファイル
+├── requirements.txt           ローカル実行用の依存ライブラリ一覧
+├── requirements-deploy.txt    クラウドデプロイ用の依存ライブラリ一覧(軽量版)
+├── requirements-dev.txt       テスト/Lint用の依存ライブラリ(pytest, ruff)
+├── pytest.ini                 pytest設定
+├── .env.example               APIキー設定のテンプレート
+├── main.py                    CLI版メインプログラム
+├── app.py                     Web版(Streamlit)メインプログラム
+├── Dockerfile                  クラウドデプロイ用のコンテナ定義
+├── rag_pipeline.py            RAGの処理ロジック(コア実装)
+├── tests/                      単体テスト
+├── .github/workflows/          CI/CDパイプライン定義(GitHub Actions)
+├── documents/                  質問対象のPDFを置く場所
+└── docs/                       実装・設計・デプロイの詳細ノート(日本語/中国語)
 ```
 
 ## ドキュメント
 
 - [docs/project-notes.ja.md](docs/project-notes.ja.md) — 実装の詳細解説
+- [docs/design-notes.ja.md](docs/design-notes.ja.md) — 設計判断の記録(何をなぜそう設計したか)
+- [docs/bug-log.ja.md](docs/bug-log.ja.md) — 発見・対応したバグの記録
+- [docs/parameter-tuning.ja.md](docs/parameter-tuning.ja.md) — パラメータチューニングの実験記録
 - [docs/azure-deploy-notes.ja.md](docs/azure-deploy-notes.ja.md) — Azureデプロイ手順
+- [docs/cicd-notes.ja.md](docs/cicd-notes.ja.md) — CI/CD構築手順
 - [docs/commands-cheatsheet.md](docs/commands-cheatsheet.md) — Docker/Azureコマンド一覧
 
 (各ファイルには同名の `.md`(中国語版)も用意しています)

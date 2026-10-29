@@ -1,6 +1,5 @@
 # rag-starter CI/CD 构建笔记
 
-> 写给：刚开始接触 CI/CD、还不熟悉 GitHub Actions 的自己。
 > 用途：忘了 CI/CD 搭到哪一步、或者为什么要做某一步时，回来看这篇。
 
 ---
