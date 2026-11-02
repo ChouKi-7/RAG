@@ -112,15 +112,25 @@ def build_vector_store(chunks, persist_directory: str | None = "./chroma_db"):
     return vector_store
 
 
+def get_llm(model_name: str = "gemini-3.1-flash-lite"):
+    """
+    回答生成に使うLLMを返す。
+
+    resume_screening.py(複数簡歴スクリーニング機能)でも同じモデル初期化ロジックを
+    使うため、build_qa_chain() から独立した関数として切り出している。
+    """
+    # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
+    # return ChatAnthropic(model=model_name, temperature=0)
+    return ChatGoogleGenerativeAI(model=model_name, temperature=0)
+
+
 def build_qa_chain(vector_store, model_name: str = "gemini-3.1-flash-lite"):
     """
     ステップ4+5: 質問に対して関連チャンクを検索し、
     関連度が低すぎる場合は検索結果を使わず「見つからなかった」と答える
     QAチェーン(に相当する設定一式)を組み立てる
     """
-    # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
-    # llm = ChatAnthropic(model=model_name, temperature=0)
-    llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
+    llm = get_llm(model_name)
 
     provider = os.getenv("EMBEDDING_PROVIDER", "huggingface").lower()
     default_threshold = _RELEVANCE_THRESHOLDS.get(provider, 22.0)

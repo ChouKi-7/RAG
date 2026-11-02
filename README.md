@@ -1,9 +1,17 @@
 # rag-starter
 
-PDFファイルの内容について自然言語で質問できる、RAG(検索拡張生成)アプリケーションです。
-文書をベクトル化して検索し、関連する箇所をもとにLLMが回答を生成する仕組みを、最小構成で実装しています。
+RAG(検索拡張生成)の学習・実験用プロジェクトです。PDFファイルの内容について自然言語で質問できる単一文書質問応答(v1、完成済み)を土台に、現在は複数の履歴書から条件に合う人を探す多文書スクリーニング機能(v2、開発中)に取り組んでいます。
 
-## デモ
+## バージョン
+
+| バージョン | 機能 | 状態 |
+|---|---|---|
+| **v1** | 1つのPDFについて自然言語で質問できる、単一文書のRAG質問応答 | ✅ 完成・Azureに本番デプロイ済み |
+| **v2** | 複数の履歴書(PDF)の中から、「Pythonを3年以上学び、プロジェクトを独立して担当できる人」のような条件に合う候補者を探す、多文書スクリーニング機能 | 🚧 開発中(ローカルのCLIで動作確認済み、Web UI・本番デプロイは未着手) |
+
+v1は単純な「類似度検索して回答する」方式ですが、v2が扱う「定量条件+定性条件が混ざった、網羅性が必要な質問」にはこの方式がそのまま使えないため、構造化データ抽出+条件フィルタ+LLMによる個別再確認、という別のパイプラインを設計しています。設計の詳細は [docs/design-notes.ja.md](docs/design-notes.ja.md)、v2の実装詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
+
+## デモ(v1)
 
 🔗 **https://rag-starter-app.happyrock-4818498e.japaneast.azurecontainerapps.io/**
 
@@ -82,6 +90,14 @@ Web版(ブラウザでPDFアップロード＋チャット):
 streamlit run app.py
 ```
 
+### v2(複数履歴書スクリーニング、開発中)を試す
+
+`documents/` フォルダに複数の履歴書PDFを入れてから:
+```bash
+python resume_screening.py
+```
+「Pythonを3年以上学び、プロジェクトを独立して担当できる人を探す」のように条件を自然言語で入力すると、該当する候補者と判断根拠(原文引用)を表示します。CLIのみで、Web UI・Azureへのデプロイはまだ対応していません。詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
+
 ## デプロイ
 
 Web版(`app.py`)をDockerコンテナ化し、Azure Container Apps(Consumptionプラン)にデプロイしています。イメージは Docker Hub でホストし、アクセスがない時はインスタンスを自動的に0台までスケールダウンするよう設定しています。
@@ -100,10 +116,11 @@ rag-starter/
 ├── requirements-dev.txt       テスト/Lint用の依存ライブラリ(pytest, ruff)
 ├── pytest.ini                 pytest設定
 ├── .env.example               APIキー設定のテンプレート
-├── main.py                    CLI版メインプログラム
-├── app.py                     Web版(Streamlit)メインプログラム
+├── main.py                    CLI版メインプログラム(v1)
+├── app.py                     Web版(Streamlit)メインプログラム(v1)
 ├── Dockerfile                  クラウドデプロイ用のコンテナ定義
-├── rag_pipeline.py            RAGの処理ロジック(コア実装)
+├── rag_pipeline.py            RAGの処理ロジック(v1コア実装)
+├── resume_screening.py        複数履歴書スクリーニング機能(v2、開発中)
 ├── tests/                      単体テスト
 ├── .github/workflows/          CI/CDパイプライン定義(GitHub Actions)
 ├── documents/                  質問対象のPDFを置く場所
@@ -112,7 +129,8 @@ rag-starter/
 
 ## ドキュメント
 
-- [docs/project-notes.ja.md](docs/project-notes.ja.md) — 実装の詳細解説
+- [docs/project-notes.ja.md](docs/project-notes.ja.md) — v1実装の詳細解説
+- [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) — v2(複数履歴書スクリーニング)の実装詳細
 - [docs/design-notes.ja.md](docs/design-notes.ja.md) — 設計判断の記録(何をなぜそう設計したか)
 - [docs/bug-log.ja.md](docs/bug-log.ja.md) — 発見・対応したバグの記録
 - [docs/parameter-tuning.ja.md](docs/parameter-tuning.ja.md) — パラメータチューニングの実験記録
