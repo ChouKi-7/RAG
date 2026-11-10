@@ -222,6 +222,25 @@ def parse_query(question: str, llm) -> ScreeningQuery:
 # 3. 絞り込み: 構造化フィルタ(LLM不要) → 定性判定(候補者ごとにLLM)
 # ---------------------------------------------------------------------------
 
+def _skill_matches(query_skill: str, candidate_skill: str) -> bool:
+    """スキル名が一致するか判定する(大文字小文字を無視、単語境界を考慮)。
+
+    単純な部分文字列一致(`"java" in "javascript"`)だと、"Java"で検索したときに
+    "JavaScript"を誤って一致させてしまう実害が実測で確認された(docs/bug-log.md #14)。
+    そのため `\\b`(単語境界)で前後を挟んで、"java"が"javascript"の中の
+    部分文字列としてではなく独立した単語として現れる場合だけ一致とみなす。
+
+    ただし `\\b` は英数字と非英数字の切り替わりでしか機能しないため、"C#"や".NET"
+    のように記号から始まる/終わるスキル名にそのまま使うと、逆に一致しなくなって
+    しまう(例: "C#"の末尾にある"#"は非英数字なので、"\\bC#\\b"は"C#"自身にすら
+    一致しない)。そのため、クエリの先頭/末尾が英数字のときだけ境界条件を付ける。
+    """
+    pattern = re.escape(query_skill.lower())
+    prefix = r"\b" if query_skill[0].isalnum() else ""
+    suffix = r"\b" if query_skill[-1].isalnum() else ""
+    return re.search(f"{prefix}{pattern}{suffix}", candidate_skill.lower()) is not None
+
+
 def filter_by_structured_criteria(records: list[dict], query: ScreeningQuery) -> list[dict]:
     """スキル名・最低経験年数の条件で候補者を絞り込む。LLMを呼ばない純粋なロジック
     なので、網羅性(見逃しがないこと)が保証できる——これが単純なベクトル類似度検索
@@ -237,7 +256,7 @@ def filter_by_structured_criteria(records: list[dict], query: ScreeningQuery) ->
         matching_skill = None
         if query.skill is not None:
             matching_skill = next(
-                (s for s in profile.skills if query.skill.lower() in s.skill.lower()),
+                (s for s in profile.skills if _skill_matches(query.skill, s.skill)),
                 None,
             )
             if matching_skill is None:
