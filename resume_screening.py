@@ -26,8 +26,10 @@ import json
 import logging
 import os
 import re
+import time
 
 from dotenv import load_dotenv
+from google.api_core.exceptions import ResourceExhausted
 from pydantic import BaseModel, Field
 
 from rag_pipeline import get_llm, load_pdf
@@ -35,6 +37,13 @@ from rag_pipeline import get_llm, load_pdf
 logger = logging.getLogger(__name__)
 
 CACHE_PATH = "resume_profiles_cache.json"
+
+# gemini-3.1-flash-lite の無料枠は「1分あたり15リクエスト」(2026-11-02実測)。
+# 候補者数が多く、構造化条件での絞り込みが効かない質問(スキル・年数を指定しない
+# 定性条件だけの質問)だと、judge_qualitative() が候補者全員分=十数回を
+# 一気に連続で呼ぶことになり、このレート制限に実際にぶつかる(docs/bug-log.md #13)。
+_RATE_LIMIT_RETRIES = 3
+_RATE_LIMIT_WAIT_SECONDS = 20
 
 
 def _invoke_structured(llm, schema: type[BaseModel], prompt: str) -> BaseModel:
@@ -46,9 +55,24 @@ def _invoke_structured(llm, schema: type[BaseModel], prompt: str) -> BaseModel:
     with_structured_output() の戻り値はNoneになり、内容自体は正しいJSONでも
     失われてしまう。そのため include_raw=True で元の応答も取得しておき、
     parsedがNoneだった場合はテキストからJSONを抜き出して自前でパースする。
+
+    また、1分あたりのリクエスト数制限(429 ResourceExhausted)に当たった場合は、
+    一定時間待ってから数回までリトライする(候補者数が多いと実際に起きるため)。
     """
     structured_llm = llm.with_structured_output(schema, include_raw=True)
-    result = structured_llm.invoke(prompt)
+
+    for attempt in range(_RATE_LIMIT_RETRIES + 1):
+        try:
+            result = structured_llm.invoke(prompt)
+            break
+        except ResourceExhausted:
+            if attempt == _RATE_LIMIT_RETRIES:
+                raise
+            logger.warning(
+                "1分あたりのリクエスト数制限に達しました。%d秒待ってリトライします(%d/%d回目)。",
+                _RATE_LIMIT_WAIT_SECONDS, attempt + 1, _RATE_LIMIT_RETRIES,
+            )
+            time.sleep(_RATE_LIMIT_WAIT_SECONDS)
 
     if result["parsed"] is not None:
         return result["parsed"]
