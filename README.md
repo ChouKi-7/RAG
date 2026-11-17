@@ -131,6 +131,7 @@ rag-starter/
 
 - [docs/project-notes.ja.md](docs/project-notes.ja.md) — v1実装の詳細解説
 - [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) — v2(複数履歴書スクリーニング)の実装詳細
+- [docs/resume-screening-eval.ja.md](docs/resume-screening-eval.ja.md) — v2の精度評価(期待値と実測結果の突き合わせ)
 - [docs/design-notes.ja.md](docs/design-notes.ja.md) — 設計判断の記録(何をなぜそう設計したか)
 - [docs/bug-log.ja.md](docs/bug-log.ja.md) — 発見・対応したバグの記録
 - [docs/parameter-tuning.ja.md](docs/parameter-tuning.ja.md) — パラメータチューニングの実験記録
