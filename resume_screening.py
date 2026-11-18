@@ -20,6 +20,7 @@ v2機能: 複数の履歴書(PDF)の中から、ユーザーの自然言語の�
 実行方法: python resume_screening.py
 """
 
+import datetime
 import glob
 import hashlib
 import json
@@ -136,7 +137,15 @@ def load_resume_text(pdf_path: str) -> str:
 
 
 def extract_candidate_profile(full_text: str, llm) -> CandidateProfile:
+    # bug-log #15: LLMは「本日」が実際いつなのか分からないため、「〜現在」という期間の
+    # 計算を丸ごとLLM任せにすると、終点が不明なまま計算して年数を過小評価することがある
+    # (特に、履歴書の要約に総経験年数が明記されておらず、プロジェクトの日付から
+    # 自分で逆算するしかない候補者ほど顕著だった)。本日の日付を明示的に渡すことで、
+    # 少なくとも「〜現在」の終点を確定させる。
+    today = datetime.date.today().isoformat()
     prompt = (
+        f"本日の日付は{today}です。「〜現在」と書かれている期間は、本日までの期間として"
+        "計算してください。\n\n"
         "以下は職務経歴書の全文です。内容を読み取り、指定されたスキーマに従って"
         "構造化してください。経験年数は、そのスキルを使ったプロジェクトの期間を"
         "合算して算出してください(履歴書に直接「X年」と書かれていなくても推定すること)。\n\n"
