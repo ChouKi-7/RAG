@@ -1,0 +1,35 @@
+name: Resume Screening CI (v2)
+
+# v1(deploy.yml)とは完全に独立したworkflow。
+# v2(resume_screening.py)はまだWeb UI/デプロイ先がないため、ビルド・デプロイは行わず
+# lint・単体テストのみを実行する。トリガーもmainへのpushには反応しない
+# (main用のCI/CDはdeploy.ymlが担当する)。
+
+on:
+  push:
+    branches: ["feature/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run unit tests
+        run: pytest tests/ -v

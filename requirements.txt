@@ -2,6 +2,9 @@ langchain==0.3.7
 # Claude(有料API)版。無料プランに切り替えるため一時的にコメントアウト。戻す場合はこちらを使う。
 # langchain-anthropic==0.3.0
 langchain-google-genai==2.0.7
+# resume_screening.py(v2)が429(レート制限)を直接捕捉してリトライするために使用。
+# langchain-google-genaiの依存として既に入っているが、直接importするため明示的に固定する。
+google-api-core==2.33.0
 langchain-community==0.3.7
 langchain-chroma==0.1.4
 langchain-huggingface==0.1.2
