@@ -29,11 +29,12 @@ import os
 import re
 import time
 
+import numpy as np
 from dotenv import load_dotenv
 from google.api_core.exceptions import ResourceExhausted
 from pydantic import BaseModel, Field
 
-from rag_pipeline import get_llm, load_pdf
+from rag_pipeline import get_embeddings, get_llm, load_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,23 @@ def parse_query(question: str, llm) -> ScreeningQuery:
 # 3. 絞り込み: 構造化フィルタ(LLM不要) → 定性判定(候補者ごとにLLM)
 # ---------------------------------------------------------------------------
 
-def _skill_matches(query_skill: str, candidate_skill: str) -> bool:
+# 単語境界マッチングでも拾えない「同義語」("ML"と"機械学習"のような、文字面が
+# 全く異なる表現)を拾うための、embeddingベースのフォールバック用しきい値。
+# 実測(2026-11-18、paraphrase-multilingual-MiniLM-L12-v2): "Go"/"Golang"=0.766、
+# "JS"/"JavaScript"=0.770、"DB"/"データベース"=0.685 は拾えるが、"ML"/"機械学習"=0.334、
+# "AWS"/"Amazon Web Services"=0.327 のような文字面が大きく違う同義語は拾えない
+# (このしきい値まで下げるとbug#14で修正した"Java"/"JavaScript"=0.441の誤判定が
+# 復活してしまうため、下げられない)。「一部の同義語は拾えるが全部ではない」という
+# 既知の限界込みで採用した、完璧ではないが何もしないよりましな対応。
+_SKILL_SIMILARITY_THRESHOLD = 0.5
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    a_arr, b_arr = np.array(a), np.array(b)
+    return float(np.dot(a_arr, b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr)))
+
+
+def _skill_matches(query_skill: str, candidate_skill: str, embeddings=None) -> bool:
     """スキル名が一致するか判定する(大文字小文字を無視、単語境界を考慮)。
 
     単純な部分文字列一致(`"java" in "javascript"`)だと、"Java"で検索したときに
@@ -243,17 +260,31 @@ def _skill_matches(query_skill: str, candidate_skill: str) -> bool:
     のように記号から始まる/終わるスキル名にそのまま使うと、逆に一致しなくなって
     しまう(例: "C#"の末尾にある"#"は非英数字なので、"\\bC#\\b"は"C#"自身にすら
     一致しない)。そのため、クエリの先頭/末尾が英数字のときだけ境界条件を付ける。
+
+    `embeddings` を渡した場合、単語境界マッチングで一致しなかったときだけ、
+    embeddingの類似度でもう一度判定する(同義語対応、docs/design-notes.md D17)。
+    単語境界マッチングで既に一致していれば、embedding計算はスキップする
+    (無料のローカルモデルとはいえ、無駄な計算はしない)。
     """
     pattern = re.escape(query_skill.lower())
     prefix = r"\b" if query_skill[0].isalnum() else ""
     suffix = r"\b" if query_skill[-1].isalnum() else ""
-    return re.search(f"{prefix}{pattern}{suffix}", candidate_skill.lower()) is not None
+    if re.search(f"{prefix}{pattern}{suffix}", candidate_skill.lower()) is not None:
+        return True
+
+    if embeddings is None:
+        return False
+
+    query_vec, candidate_vec = embeddings.embed_documents([query_skill, candidate_skill])
+    return _cosine_similarity(query_vec, candidate_vec) >= _SKILL_SIMILARITY_THRESHOLD
 
 
-def filter_by_structured_criteria(records: list[dict], query: ScreeningQuery) -> list[dict]:
+def filter_by_structured_criteria(records: list[dict], query: ScreeningQuery, embeddings=None) -> list[dict]:
     """スキル名・最低経験年数の条件で候補者を絞り込む。LLMを呼ばない純粋なロジック
     なので、網羅性(見逃しがないこと)が保証できる——これが単純なベクトル類似度検索
     に対するこの設計の優位点(docs/design-notes.md D12)。
+
+    `embeddings` を渡すと、スキル名の同義語マッチング(D17)が有効になる。
     """
     if query.skill is None and query.min_years is None:
         return list(records)
@@ -265,7 +296,7 @@ def filter_by_structured_criteria(records: list[dict], query: ScreeningQuery) ->
         matching_skill = None
         if query.skill is not None:
             matching_skill = next(
-                (s for s in profile.skills if _skill_matches(query.skill, s.skill)),
+                (s for s in profile.skills if _skill_matches(query.skill, s.skill, embeddings)),
                 None,
             )
             if matching_skill is None:
@@ -293,15 +324,15 @@ def judge_qualitative(full_text: str, criteria: str, llm) -> QualitativeJudgemen
     return _invoke_structured(llm, QualitativeJudgement, prompt)
 
 
-def screen_candidates(records: list[dict], question: str, llm) -> tuple[ScreeningQuery, list[dict]]:
+def screen_candidates(records: list[dict], question: str, llm, embeddings=None) -> tuple[ScreeningQuery, list[dict]]:
     """3段階パイプライン全体を実行する。
 
     戻り値: (解析されたクエリ, 条件に合致した候補者のリスト)
     候補者1件は {"source", "profile", "judgement"}(judgementは定性条件が
-    なければNone)。
+    なければNone)。`embeddings` を渡すとスキル名の同義語マッチングが有効になる。
     """
     query = parse_query(question, llm)
-    filtered = filter_by_structured_criteria(records, query)
+    filtered = filter_by_structured_criteria(records, query, embeddings)
 
     results = []
     if query.qualitative_criteria:
@@ -354,6 +385,7 @@ def main():
         print(f"  - {path}")
 
     llm = get_llm()
+    embeddings = get_embeddings()
 
     print("\n構造化プロフィールを準備しています(初回のみLLM呼び出し、2回目以降はキャッシュを再利用)...")
     records = build_candidate_profiles(pdf_paths, llm)
@@ -366,7 +398,7 @@ def main():
             print("終了します。")
             break
 
-        query, results = screen_candidates(records, question, llm)
+        query, results = screen_candidates(records, question, llm, embeddings)
         print(f"\n解析した条件: スキル={query.skill!r}, 最低年数={query.min_years!r}, 定性条件={query.qualitative_criteria!r}")
 
         if not results:

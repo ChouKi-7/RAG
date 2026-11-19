@@ -7,7 +7,7 @@ RAG(検索拡張生成)の学習・実験用プロジェクトです。PDFファ
 | バージョン | 機能 | 状態 |
 |---|---|---|
 | **v1** | 1つのPDFについて自然言語で質問できる、単一文書のRAG質問応答 | ✅ 完成・Azureに本番デプロイ済み |
-| **v2** | 複数の履歴書(PDF)の中から、「Pythonを3年以上学び、プロジェクトを独立して担当できる人」のような条件に合う候補者を探す、多文書スクリーニング機能 | 🚧 開発中(ローカルのCLIで動作確認済み、Web UI・本番デプロイは未着手) |
+| **v2** | 複数の履歴書(PDF)の中から、「Pythonを3年以上学び、プロジェクトを独立して担当できる人」のような条件に合う候補者を探す、多文書スクリーニング機能 | 🚧 開発中(CLI・Web UIともローカルで動作確認済み、本番デプロイは未着手) |
 
 v1は単純な「類似度検索して回答する」方式ですが、v2が扱う「定量条件+定性条件が混ざった、網羅性が必要な質問」にはこの方式がそのまま使えないため、構造化データ抽出+条件フィルタ+LLMによる個別再確認、という別のパイプラインを設計しています。設計の詳細は [docs/design-notes.ja.md](docs/design-notes.ja.md)、v2の実装詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
 
@@ -92,11 +92,17 @@ streamlit run app.py
 
 ### v2(複数履歴書スクリーニング、開発中)を試す
 
-`documents/` フォルダに複数の履歴書PDFを入れてから:
+CLI版(`documents/` フォルダに複数の履歴書PDFを入れてから):
 ```bash
 python resume_screening.py
 ```
-「Pythonを3年以上学び、プロジェクトを独立して担当できる人を探す」のように条件を自然言語で入力すると、該当する候補者と判断根拠(原文引用)を表示します。CLIのみで、Web UI・Azureへのデプロイはまだ対応していません。詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
+
+Web版(ブラウザで複数PDFアップロード＋チャット形式で条件を質問):
+```bash
+streamlit run resume_screening_app.py --server.port 8502
+```
+
+「Pythonを3年以上学び、プロジェクトを独立して担当できる人を探す」のように条件を自然言語で入力すると、該当する候補者と判断根拠(原文引用)を表示します。どちらもローカル実行のみで、Azureへのデプロイはまだ対応していません。詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
 
 ## デプロイ
 
@@ -120,7 +126,8 @@ rag-starter/
 ├── app.py                     Web版(Streamlit)メインプログラム(v1)
 ├── Dockerfile                  クラウドデプロイ用のコンテナ定義
 ├── rag_pipeline.py            RAGの処理ロジック(v1コア実装)
-├── resume_screening.py        複数履歴書スクリーニング機能(v2、開発中)
+├── resume_screening.py        複数履歴書スクリーニング機能(v2コア実装、開発中)
+├── resume_screening_app.py    複数履歴書スクリーニングのWeb版(v2、開発中)
 ├── tests/                      単体テスト
 ├── .github/workflows/          CI/CDパイプライン定義(GitHub Actions)
 ├── documents/                  質問対象のPDFを置く場所
