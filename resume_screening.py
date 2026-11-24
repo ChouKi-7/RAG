@@ -114,10 +114,15 @@ class ScreeningQuery(BaseModel):
         default=None,
         description="年数やスキル名のような定量条件に落とし込めない、定性的な条件の原文(例: 'プロジェクトを独立して担当できる')。なければnull",
     )
+    limit: int | None = Field(
+        default=None,
+        description="質問の中で指定された、結果を絞り込む人数(例:「2人」「上位3件」「1人だけ」の2や3や1)。指定がなければnull",
+    )
 
 
 class QualitativeJudgement(BaseModel):
     matches: bool = Field(description="この候補者が定性条件を満たすかどうか")
+    match_score: int = Field(description="定性条件にどれだけ強く合致しているかを0〜100で表したスコア。100が最も強く合致")
     reason: str = Field(description="判断の理由")
     evidence_quote: str | None = Field(default=None, description="判断の根拠となる履歴書内の原文引用")
 
@@ -221,7 +226,8 @@ def build_candidate_profiles(pdf_paths: list[str], llm, cache_path: str = CACHE_
 def parse_query(question: str, llm) -> ScreeningQuery:
     prompt = (
         "以下はユーザーが人材を探すために入力した質問です。質問の中から、"
-        "技術スキル名・最低経験年数(数値)・それ以外の定性的な条件、を"
+        "技術スキル名・最低経験年数(数値)・それ以外の定性的な条件・"
+        "結果を何件に絞るか(例:「2人」「上位3件」)、を"
         "指定されたスキーマに従って抽出してください。\n\n"
         f"質問: {question}"
     )
@@ -319,15 +325,51 @@ def judge_qualitative(full_text: str, criteria: str, llm) -> QualitativeJudgemen
     prompt = (
         "以下は候補者の職務経歴書の全文です。この人物が次の条件を満たしているか、"
         "原文の記述だけを根拠に判定してください。記述がない場合は満たしていないと"
-        f"判定してください。\n\n条件: {criteria}\n\n職務経歴書全文:\n{full_text}"
+        "判定してください。また、条件にどれだけ強く合致しているかを0〜100のスコアで"
+        f"表してください(複数人を比較してランキングするために使います)。\n\n"
+        f"条件: {criteria}\n\n職務経歴書全文:\n{full_text}"
     )
     return _invoke_structured(llm, QualitativeJudgement, prompt)
+
+
+def _relevant_years(profile: CandidateProfile, query: ScreeningQuery, embeddings=None) -> float:
+    """並び替え用に、質問と関係のある経験年数を1つ返す。
+    スキル指定があればそのスキルの年数、なければ全スキル中の最大年数。
+    """
+    if query.skill is not None:
+        matching_skill = next(
+            (s for s in profile.skills if _skill_matches(query.skill, s.skill, embeddings)),
+            None,
+        )
+        if matching_skill is not None:
+            return matching_skill.years
+    return max((s.years for s in profile.skills), default=0.0)
+
+
+def _rank_and_limit(results: list[dict], query: ScreeningQuery, embeddings=None) -> list[dict]:
+    """マッチ度の高い順に並び替え、質問で件数が指定されていれば先頭から切り詰める。
+
+    定性条件がある場合はLLMが付けた`match_score`の高い順、ない場合は該当スキルの
+    経験年数が長い順(スキル未指定なら全スキル中の最大年数)に並べる——定性判定は
+    候補者ごとにLLMを呼ぶので、既にスコアという形で「どれだけ合うか」の情報を
+    持っている。一方、構造化条件だけの質問は候補者を一切LLMに読ませていないので、
+    手元にある年数という数字を順位の代わりに使う。
+    """
+    if query.qualitative_criteria:
+        ranked = sorted(results, key=lambda r: r["judgement"].match_score, reverse=True)
+    else:
+        ranked = sorted(results, key=lambda r: _relevant_years(r["profile"], query, embeddings), reverse=True)
+
+    if query.limit is not None:
+        ranked = ranked[: query.limit]
+    return ranked
 
 
 def screen_candidates(records: list[dict], question: str, llm, embeddings=None) -> tuple[ScreeningQuery, list[dict]]:
     """3段階パイプライン全体を実行する。
 
-    戻り値: (解析されたクエリ, 条件に合致した候補者のリスト)
+    戻り値: (解析されたクエリ, 条件に合致した候補者のリスト。マッチ度が高い順に
+    並んでおり、質問で件数指定があればその件数に絞り込み済み)
     候補者1件は {"source", "profile", "judgement"}(judgementは定性条件が
     なければNone)。`embeddings` を渡すとスキル名の同義語マッチングが有効になる。
     """
@@ -343,6 +385,7 @@ def screen_candidates(records: list[dict], question: str, llm, embeddings=None) 
     else:
         results = [{**record, "judgement": None} for record in filtered]
 
+    results = _rank_and_limit(results, query, embeddings)
     return query, results
 
 
@@ -359,11 +402,12 @@ def find_all_pdfs_in_documents() -> list[str]:
     return pdf_files
 
 
-def _print_result(result: dict) -> None:
+def _print_result(rank: int, result: dict) -> None:
     profile: CandidateProfile = result["profile"]
     judgement: QualitativeJudgement | None = result["judgement"]
     skills_str = "、".join(f"{s.skill}({s.years}年)" for s in profile.skills)
-    print(f"  ● {profile.candidate_name}  [{result['source']}]")
+    score_str = f"  マッチ度: {judgement.match_score}/100" if judgement is not None else ""
+    print(f"  {rank}. ● {profile.candidate_name}  [{result['source']}]{score_str}")
     print(f"    スキル: {skills_str}")
     if judgement is not None:
         print(f"    判定理由: {judgement.reason}")
@@ -399,15 +443,18 @@ def main():
             break
 
         query, results = screen_candidates(records, question, llm, embeddings)
-        print(f"\n解析した条件: スキル={query.skill!r}, 最低年数={query.min_years!r}, 定性条件={query.qualitative_criteria!r}")
+        print(
+            f"\n解析した条件: スキル={query.skill!r}, 最低年数={query.min_years!r}, "
+            f"定性条件={query.qualitative_criteria!r}, 件数={query.limit!r}"
+        )
 
         if not results:
             print("条件に合致する候補者は見つかりませんでした。\n")
             continue
 
-        print(f"{len(results)}名が条件に合致しました:")
-        for result in results:
-            _print_result(result)
+        print(f"{len(results)}名が条件に合致しました(マッチ度が高い順):")
+        for rank, result in enumerate(results, 1):
+            _print_result(rank, result)
         print()
 
 

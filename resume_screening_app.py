@@ -112,18 +112,22 @@ if "records" in st.session_state:
                 st.caption(
                     f"解析した条件: スキル={query.skill or 'なし'} / "
                     f"最低年数={query.min_years if query.min_years is not None else 'なし'} / "
-                    f"定性条件={query.qualitative_criteria or 'なし'}"
+                    f"定性条件={query.qualitative_criteria or 'なし'} / "
+                    f"件数指定={query.limit if query.limit is not None else 'なし'}"
                 )
                 if not results:
                     st.markdown("条件に合致する候補者は見つかりませんでした。")
                 else:
-                    st.markdown(f"**{len(results)}名**が条件に合致しました:")
-                    for r in results:
+                    st.markdown(f"**{len(results)}名**が条件に合致しました(マッチ度が高い順):")
+                    for rank, r in enumerate(results, 1):
                         profile = r["profile"]
                         judgement = r["judgement"]
                         skills_str = "、".join(f"{s.skill}({s.years}年)" for s in profile.skills)
                         with st.container(border=True):
-                            st.markdown(f"**● {profile.candidate_name}**")
+                            title = f"**{rank}. ● {profile.candidate_name}**"
+                            if judgement is not None:
+                                title += f"　マッチ度: {judgement.match_score}/100"
+                            st.markdown(title)
                             st.caption(f"スキル: {skills_str}")
                             if judgement is not None:
                                 st.markdown(f"判定理由: {judgement.reason}")

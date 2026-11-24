@@ -8,8 +8,11 @@ resume_screening.py のうち、LLM/ネットワークを必要としない「�
 
 from resume_screening import (
     CandidateProfile,
+    QualitativeJudgement,
     ScreeningQuery,
     SkillExperience,
+    _rank_and_limit,
+    _relevant_years,
     _skill_matches,
     filter_by_structured_criteria,
 )
@@ -132,3 +135,67 @@ class TestSkillMatchesEmbeddingFallback:
         embeddings = FakeEmbeddings({"ML": [1.0, 0.0], "機械学習": [1.0, 0.0]})
         assert filter_by_structured_criteria(records, query, embeddings) == records
         assert filter_by_structured_criteria(records, query) == []  # embeddings省略時は従来通り
+
+
+def _with_judgement(record: dict, matches: bool, score: int) -> dict:
+    judgement = QualitativeJudgement(matches=matches, match_score=score, reason="test")
+    return {**record, "judgement": judgement}
+
+
+class TestRelevantYears:
+    def test_uses_matching_skill_years_when_skill_specified(self):
+        profile = CandidateProfile(
+            candidate_name="A",
+            skills=[SkillExperience(skill="Java", years=5), SkillExperience(skill="Python", years=2)],
+            has_led_project=False,
+        )
+        assert _relevant_years(profile, ScreeningQuery(skill="Java")) == 5
+
+    def test_uses_max_years_when_no_skill_specified(self):
+        profile = CandidateProfile(
+            candidate_name="A",
+            skills=[SkillExperience(skill="Java", years=5), SkillExperience(skill="Python", years=8)],
+            has_led_project=False,
+        )
+        assert _relevant_years(profile, ScreeningQuery()) == 8
+
+    def test_returns_zero_for_candidate_with_no_skills(self):
+        profile = CandidateProfile(candidate_name="A", skills=[], has_led_project=False)
+        assert _relevant_years(profile, ScreeningQuery()) == 0.0
+
+
+class TestRankAndLimit:
+    def test_sorts_by_match_score_descending_when_qualitative_criteria_present(self):
+        results = [
+            _with_judgement(_make_record("A", [("Java", 3)]), True, 60),
+            _with_judgement(_make_record("B", [("Java", 3)]), True, 90),
+            _with_judgement(_make_record("C", [("Java", 3)]), True, 75),
+        ]
+        query = ScreeningQuery(qualitative_criteria="独立して担当できる")
+        ranked = _rank_and_limit(results, query)
+        assert [r["profile"].candidate_name for r in ranked] == ["B", "C", "A"]
+
+    def test_sorts_by_relevant_years_descending_without_qualitative_criteria(self):
+        results = [
+            {**_make_record("A", [("Java", 3)]), "judgement": None},
+            {**_make_record("B", [("Java", 9)]), "judgement": None},
+            {**_make_record("C", [("Java", 5)]), "judgement": None},
+        ]
+        query = ScreeningQuery(skill="Java")
+        ranked = _rank_and_limit(results, query)
+        assert [r["profile"].candidate_name for r in ranked] == ["B", "C", "A"]
+
+    def test_limit_truncates_to_requested_count_after_ranking(self):
+        results = [
+            _with_judgement(_make_record("A", [("Java", 3)]), True, 60),
+            _with_judgement(_make_record("B", [("Java", 3)]), True, 90),
+            _with_judgement(_make_record("C", [("Java", 3)]), True, 75),
+        ]
+        query = ScreeningQuery(qualitative_criteria="独立して担当できる", limit=2)
+        ranked = _rank_and_limit(results, query)
+        assert [r["profile"].candidate_name for r in ranked] == ["B", "C"]
+
+    def test_no_limit_returns_all_ranked_results(self):
+        results = [_with_judgement(_make_record("A", [("Java", 3)]), True, 50)]
+        query = ScreeningQuery(qualitative_criteria="独立して担当できる")
+        assert len(_rank_and_limit(results, query)) == 1

@@ -102,7 +102,7 @@ Web版(ブラウザで複数PDFアップロード＋チャット形式で条件�
 streamlit run resume_screening_app.py --server.port 8502
 ```
 
-「Pythonを3年以上学び、プロジェクトを独立して担当できる人を探す」のように条件を自然言語で入力すると、該当する候補者と判断根拠(原文引用)を表示します。どちらもローカル実行のみで、Azureへのデプロイはまだ対応していません。詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
+「Pythonを3年以上学び、プロジェクトを独立して担当できる人を探す」のように条件を自然言語で入力すると、該当する候補者と判断根拠(原文引用)をマッチ度が高い順に表示します。「2人だけ教えて」のように件数を指定することも可能です。どちらもローカル実行のみで、Azureへのデプロイはまだ対応していません。詳細は [docs/resume-screening-notes.ja.md](docs/resume-screening-notes.ja.md) を参照してください。
 
 ## デプロイ
 

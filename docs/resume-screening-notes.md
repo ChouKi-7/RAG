@@ -1,7 +1,7 @@
 # 多简历筛选功能（v2）笔记
 
 > 对应代码：[resume_screening.py](../resume_screening.py)
-> 这份文档讲"这个功能怎么运作"。设计上"为什么这么做"的简短版本在 [design-notes.md D12~D16](design-notes.md)；
+> 这份文档讲"这个功能怎么运作"。设计上"为什么这么做"的简短版本在 [design-notes.md D12~D18](design-notes.md)；
 > 单文档问答(v1)的代码讲解在 [project-notes.md](project-notes.md)；准确率评测的数据和分析在 [resume-screening-eval.md](resume-screening-eval.md)。
 
 ---
@@ -47,8 +47,10 @@ class CandidateProfile(BaseModel):
 用户输入"Pythonを3年以上学び、プロジェクトを独立して担当できる人を探す"，同样用`with_structured_output()`解析成：
 
 ```python
-ScreeningQuery(skill="Python", min_years=3.0, qualitative_criteria="プロジェクトを独立して担当できる")
+ScreeningQuery(skill="Python", min_years=3.0, qualitative_criteria="プロジェクトを独立して担当できる", limit=None)
 ```
+
+`limit`（2026-11-24新增）是问题里提到的数量限制，比如"2人""上位3件"，没提到就是`None`。
 
 ### 第3步：两段式筛选
 
@@ -67,11 +69,22 @@ if candidate_years < query.min_years:
 ```python
 class QualitativeJudgement(BaseModel):
     matches: bool
+    match_score: int   # 0-100，2026-11-24新增，用于给结果排序
     reason: str
     evidence_quote: str | None
 ```
 
 两步合起来是 `screen_candidates()`：结构化条件先缩小范围（候选人多的时候省LLM调用），定性条件再精筛，筛选结果带着"为什么选中Ta"的依据，不是黑盒结论。
+
+### 第4步（2026-11-24新增）：排序 + 数量限制（`_rank_and_limit()`）
+
+原来筛选结果是无序的，没法回答"帮我找2个Java经验的人"这种带数量限制的问题。现在`screen_candidates()`在返回结果前多做一步：
+
+- **有定性条件**：按`judge_qualitative()`打的`match_score`从高到低排——这一步没有额外成本，分数本来就是判定的时候顺带输出的
+- **没有定性条件**：按已经抽取好的技能年限从高到低排——同样不调用额外的LLM，纯粹复用已有数字
+- 排好序之后，如果`query.limit`有值就截断到对应条数
+
+这个顺序（先排序、再截断）是故意的：保证"前2个"真的是"最匹配的2个"，不是"随便2个"。
 
 ## 三、实测踩过的坑
 
@@ -100,7 +113,8 @@ streamlit run resume_screening_app.py --server.port 8502
 - ~~技能名匹配比较粗糙~~（**子串误判2026-11-10已修复，同义词2026-11-18部分支持**）：原来是大小写不敏感的子串匹配，"Java"会连"JavaScript"也匹配上——用专门设计的10份IT行业测试简历实测复现后，改成了单词边界匹配（`_skill_matches()`，详见 [design-notes.md D14](design-notes.md)、[bug-log.md #14](bug-log.md)）。同义词/别名（"机器学习" vs "ML"）这块后续加了embedding相似度兜底（单词边界没匹配上时，再算两个词的向量相似度，超过阈值也算匹配，详见 [design-notes.md D17](design-notes.md)）——**但这是"部分支持"不是"解决"**：实测验证过"Go/Golang""JS/JavaScript"这类同义词能拾到，但"ML/機械学習""AWS/Amazon Web Services"这类字面差异很大的缩写还是拾不到，阈值没法同时兼顾（调低会导致bug#14复发）
 - ~~还没有系统性的准确率评测~~（**2026-11-17已完成一轮，并修复了发现的主要问题**）：技能识别13/13正确，定性判断（独立负责与否）10/10正确含关键负例。年限推算最初发现"只在标题简略提及/需要跨项目加总时会明显偏低"的问题（根因是LLM不知道"今天"是哪天），已通过给抽取prompt显式传入当前日期修复——但**修复过程中又发现一个新的、尚未解决的问题**：个别候选人会把跟某技能完全无关的项目时长也错误地算进该技能的年限里（张冠李戴），这个新问题目前**尚未修复**（已记录为 [bug-log.md #16](bug-log.md)，权衡后判断"保留日期修复、接受这个新问题"整体利大于弊）。完整方法论、数据表、分析见专门的评测文档 [resume-screening-eval.md](resume-screening-eval.md)
 - ~~候选人多了以后的成本还没测过~~（**2026-11-10已部分验证，发现新问题**）：用14份简历（4份旧的+10份新生成的IT行业测试简历）测试后，发现候选人一多、问题又没带技能/年限这类能先做结构化过滤的条件时，会连续密集调用LLM，撞上Gemini免费层"每分钟15次请求"的限流（[bug-log.md #13](bug-log.md)），已加重试兜底。但**延迟和费用**层面的量化数据还是没有——现在是"撞到限流会自动等待重试"，不等于"响应快、成本低"
+- **排序结果里的并列分数**（2026-11-24新发现，不是bug）：定性判断是逐个候选人独立打分的，不是一次性把所有人放一起比较，所以"明显都符合"的候选人经常打出并列最高分（实测9人里前3名都是100分）。并列的人之间排前排后，目前靠的是候选人列表本身的原始顺序，不代表真实优劣——这是"独立打分"这个设计天然的副作用，详见 [design-notes.md D18](design-notes.md)
 
 ---
 
-*这份文档由 Claude 根据 2026-11-02 实现该功能时的过程整理，2026-11-10 补充了技能匹配修复和限流问题的进展，2026-11-17 补充了系统性准确率评测、年限低估修复(bug#15)及新发现的技能归属问题(bug#16)，2026-11-18 补充了Web版(`resume_screening_app.py`)和同义词匹配(embedding兜底)的说明。*
+*这份文档由 Claude 根据 2026-11-02 实现该功能时的过程整理，2026-11-10 补充了技能匹配修复和限流问题的进展，2026-11-17 补充了系统性准确率评测、年限低估修复(bug#15)及新发现的技能归属问题(bug#16)，2026-11-18 补充了Web版(`resume_screening_app.py`)和同义词匹配(embedding兜底)的说明，2026-11-24 补充了结果排序与数量限制(`limit`)的说明。*
